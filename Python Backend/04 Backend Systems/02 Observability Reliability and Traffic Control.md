@@ -59,12 +59,23 @@ async def submit_order(order: Order, request_id: str) -> ExchangeAck:
     return ack
 ```
 
-### Interview Traps
+Example success log:
 
-- Saying "just log everything".
-- Logging only error strings without identifiers.
-- Logging stack traces for expected validation failures.
-- Forgeting that missing logs are also a production bug.
+```json
+{"event":"exchange_submit_ack","request_id":"req-9f4c","client_order_id":"co-123","venue":"NASDAQ","latency_ms":42.8}
+```
+
+Example timeout log:
+
+```json
+{"event":"exchange_submit_timeout","request_id":"req-9f4c","client_order_id":"co-123","venue":"NASDAQ","symbol":"AAPL"}
+```
+
+These logs are useful because they have stable event names and identifiers. During an incident, you can search by `request_id`, `client_order_id`, or `venue` without exposing secrets or dumping whole payloads.
+
+### Keep In Mind
+
+Do not "log everything"; log the identifiers and state transitions needed to debug safely. Missing logs on important paths are also production bugs because they make failures hard to explain.
 
 ### Performance Considerations
 
@@ -126,6 +137,15 @@ async def ready():
     return {"status": "ready"}
 ```
 
+Example output:
+
+```text
+GET /health/live  -> 200 {"status": "ok"}
+GET /health/ready -> 503 {"status": "not_ready"} when DB or Redis is unavailable
+```
+
+Liveness answers "is the process alive?" while readiness answers "should traffic be sent here?" Keeping them separate prevents a slow dependency from causing unnecessary process restarts.
+
 ### Prometheus Metric Example
 
 ```python
@@ -141,12 +161,18 @@ async def create_order(order: OrderCreate):
     return result
 ```
 
-### Interview Traps
+Example metric output:
 
-- Alerting on CPU only while user-facing errors go unnoticed.
-- No p95/p99 latency tracking.
-- Health checks that always return `200` even when dependencies are down.
-- Dashboards with no ownership or runbook.
+```text
+orders_created_total{venue="NASDAQ"} 1240
+order_create_seconds_bucket{le="0.1"} 982
+```
+
+The counter tells you how many orders were accepted, and the histogram shows latency distribution. The `venue` label is bounded and useful; raw `order_id` or `request_id` would create too many unique metric series.
+
+### Keep In Mind
+
+Alert on symptoms users feel: error rate, p95/p99 latency, queue lag, and failed critical flows. A dashboard without an owner or runbook is much less useful during an incident.
 
 ### Performance Considerations
 
@@ -218,12 +244,19 @@ async def retry_transient(call, *, attempts: int = 3, base_delay: float = 0.05, 
     raise TimeoutError("operation failed after retry budget") from last_error
 ```
 
-### Interview Traps
+Example flow:
 
-- Retrying non-idempotent writes.
-- Retrying immediately with no jitter.
-- Having per-call timeouts but no end-to-end deadline.
-- Retrying `400`/validation errors.
+```text
+attempt 1: timeout after 0.5s remaining budget
+sleep with jitter
+attempt 2: succeeds, return result
+```
+
+The wrapper limits the total time spent, not just each individual try. Backoff and jitter spread retries out so all clients do not hit the same unhealthy dependency at once.
+
+### Keep In Mind
+
+Retries are only safe when the operation is idempotent or the duplicate side effect is acceptable. Do not retry validation errors, and always cap total elapsed time.
 
 ### Performance Considerations
 
@@ -300,12 +333,18 @@ async def allow_request(redis, key: str, *, rate_per_sec: int, burst: int) -> bo
 
 In production, make the update atomic with Lua or a Redis transaction.
 
-### Interview Traps
+Example output:
 
-- Implementing distributed rate limits with local process memory only.
-- Ignoring clock and atomicity issues.
-- No plan for Redis outage.
-- Applying one global limit to all endpoints regardless of cost.
+```text
+allow_request(..., rate_per_sec=10, burst=20) -> True while tokens remain
+allow_request(..., rate_per_sec=10, burst=20) -> False when the bucket is empty
+```
+
+The bucket refills over time up to the burst size. Returning `False` lets the API respond with `429 Too Many Requests` before expensive backend work starts.
+
+### Keep In Mind
+
+Local in-memory limits only protect one process, not the whole fleet. For distributed limits, make the Redis update atomic and decide whether Redis failure should fail open or fail closed.
 
 ### Performance Considerations
 

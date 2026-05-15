@@ -40,6 +40,16 @@ async def apply_fill(symbol: str, quantity: int):
 
 For real production balances, prefer database transactions or a single-writer event stream over process-local locks.
 
+Example output after two safe calls:
+
+```text
+await apply_fill("AAPL", 10)
+await apply_fill("AAPL", 5)
+positions["AAPL"] -> 15
+```
+
+The lock makes the read-modify-write sequence run one task at a time inside this process. That is enough for the toy dictionary, but production balances should be protected by the database or by a single owner for the account/order stream.
+
 ### SQL Lost Update Fix
 
 ```sql
@@ -51,12 +61,18 @@ WHERE id = :account_id
 
 Check affected row count. This is atomic and avoids read-check-write races.
 
-### Interview Traps
+Example SQL outcome:
 
-- Saying the GIL prevents races.
-- Locking only in one app instance while multiple instances run.
-- Assuming async means parallelism.
-- Ignoring deadlocks and lock ordering.
+```text
+affected rows = 1 -> reservation succeeded
+affected rows = 0 -> insufficient available balance or missing account
+```
+
+The database evaluates the balance condition and update together, so two concurrent requests cannot both reserve the same cash based on an old read.
+
+### Keep In Mind
+
+The GIL does not make business logic race-free, and local locks only protect one process. For shared production state, prefer constraints, conditional updates, transactions, queues, or clear ownership.
 
 ### Performance Considerations
 
@@ -124,12 +140,20 @@ async def worker():
 
 Production queues are usually Redis Streams, RabbitMQ, SQS, Kafka, Celery/RQ, or similar.
 
-### Interview Traps
+Example flow:
 
-- Forgetting dead-letter queues.
-- Retrying poison messages forever.
-- Assuming queue success means downstream success.
-- No idempotency key in jobs.
+```text
+enqueue_reconcile("acct-123") -> job enters the queue
+worker() reads job            -> reconcile_account("acct-123") runs in background
+TransientError                -> job is scheduled for retry
+Unexpected error              -> job goes to dead-letter handling
+```
+
+The API can acknowledge work quickly while the worker handles slow or retryable processing. The queue boundary also gives you a place to measure lag and isolate failures.
+
+### Keep In Mind
+
+Queue delivery is usually at-least-once, so workers must be idempotent. Use retry limits and dead-letter queues so poison messages do not run forever.
 
 ### Performance Considerations
 
@@ -189,12 +213,18 @@ Modern backend services depend on databases, caches, queues, proxies, auth syste
 
 Under network partition, a distributed system must choose between consistency and availability. In interviews, avoid overusing CAP; apply it to a real decision like "should order state reads come from primary or replica?"
 
-### Interview Traps
+Example decision:
 
-- Saying "use microservices" without discussing failure boundaries.
-- Assuming exactly-once delivery.
-- Ignoring replication lag.
-- Relying on wall-clock ordering for correctness.
+```text
+Read order status from primary -> fresher result, more load on primary
+Read order status from replica -> lower primary load, possible stale status during lag
+```
+
+The tradeoff is not abstract jargon; it changes what a user sees after placing or cancelling an order. For critical state, you may choose fresher primary reads; for dashboards, slightly stale replica reads may be acceptable.
+
+### Keep In Mind
+
+Do not assume exactly-once delivery, perfect clocks, or zero replication lag. Every distributed-system answer should name the failure mode and the mechanism that contains it.
 
 ### Performance Considerations
 
@@ -259,6 +289,16 @@ async def create_order(
         return order
 ```
 
+Example outputs:
+
+```text
+First request with key k1        -> creates order ord-1 and stores response
+Retry with key k1 + same body    -> returns stored response for ord-1
+Retry with key k1 + changed body -> 409 Conflict
+```
+
+The idempotency record is written in the same transaction as the order, so there is no gap where the order exists but the retry key is missing.
+
 ### Duplicate Request Handling
 
 | Case | Response |
@@ -268,12 +308,9 @@ async def create_order(
 | Same key + in progress | `202 Accepted` or retry-after response |
 | Key expired | Treat as new request, depending on contract |
 
-### Interview Traps
+### Keep In Mind
 
-- Storing idempotency key after the side effect, leaving a race window.
-- Using only in-memory dedupe.
-- Not hashing/comparing payloads.
-- Forgetting downstream side effects like exchange submission.
+Store the idempotency key atomically with the state change, not after the side effect. In-memory dedupe is not enough when multiple instances or worker restarts are involved.
 
 ### Performance Considerations
 
@@ -328,12 +365,19 @@ async def get_order(order_id: str, user: User = Depends(require_user)):
 
 No per-user data is stored in process memory, so any instance can handle the request.
 
-### Interview Traps
+Example behavior:
 
-- Scaling stateless apps while ignoring the database.
-- Storing sessions in local memory.
-- Assuming autoscaling instantly fixes overload.
-- No warmup/readiness behavior.
+```text
+Request 1 -> api-1 handles /v1/orders/ord-1
+Request 2 -> api-2 handles /v1/orders/ord-1
+Both work because user/session/order state is outside the app process.
+```
+
+This is why stateless handlers scale cleanly behind a load balancer. Adding more app instances increases API capacity until the next shared dependency, usually DB or Redis, becomes the bottleneck.
+
+### Keep In Mind
+
+Horizontal scaling moves pressure to shared dependencies. Keep sessions and shared state outside local memory, and use readiness checks so new instances receive traffic only when they are ready.
 
 ### Performance Considerations
 
@@ -405,12 +449,19 @@ server {
 }
 ```
 
-### Interview Traps
+Example behavior:
 
-- Forgetting health checks.
-- No timeout between proxy and app.
-- Sticky sessions used because app stores local state.
-- No connection draining during deploy.
+```text
+api-1 healthy and few connections -> receives more traffic
+api-2 fails health checks         -> removed from rotation
+deploy starts                    -> old instance drains in-flight requests before exit
+```
+
+The load balancer improves availability only if health checks, timeouts, and connection draining match the app's real behavior. The `X-Request-ID` header keeps requests traceable after they pass through the proxy.
+
+### Keep In Mind
+
+Health checks and proxy timeouts are part of the API's reliability contract. Sticky sessions can hide local state problems and make scaling harder.
 
 ### Performance Considerations
 

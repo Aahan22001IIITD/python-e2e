@@ -54,12 +54,18 @@ client = httpx.AsyncClient(
 )
 ```
 
-### Interview Traps
+Example behavior:
 
-- Setting huge pools per instance and overwhelming the DB after scaling out.
-- Not closing connections on shutdown.
-- Holding DB connections while waiting on external services.
-- No timeout for pool acquisition.
+```text
+fetch_order(pool, "ord-1") -> one row such as {"id": "ord-1", "symbol": "AAPL", "status": "OPEN"}
+If all 20 DB connections are busy, the next request waits instead of opening unlimited new connections.
+```
+
+The pool reuses existing connections and puts a hard limit on concurrent database work from this service instance. The HTTP client does the same for downstream calls, including separate timeouts for connect, read, write, and pool waiting.
+
+### Keep In Mind
+
+Do not set a huge pool per app instance without checking total database capacity. Avoid holding a DB connection while waiting on slow external services.
 
 ### Performance Considerations
 
@@ -129,12 +135,19 @@ async def get_risk_limits(account_id: str) -> dict:
     return limits
 ```
 
-### Interview Traps
+Example flow:
 
-- Saying "add Redis" without discussing invalidation/staleness.
-- Caching permission checks or risk limits with unsafe TTLs.
-- No stampede protection during cache misses.
-- No plan for Redis failure.
+```text
+First request  -> Redis miss, read from DB, cache for 30 seconds, return limits
+Second request -> Redis hit, return cached limits without hitting DB
+After TTL      -> Redis miss again, refresh from DB
+```
+
+This is cache-aside: the application owns both the cache lookup and the fallback to the source of truth. The TTL bounds how stale the answer can become.
+
+### Keep In Mind
+
+Caching is a tradeoff: lower latency and less DB load in exchange for possible staleness. Be careful with permissions, balances, and risk limits because stale data can be worse than slow data.
 
 ### Performance Considerations
 
@@ -205,12 +218,19 @@ async def get_or_create_order(key: str, payload_hash: str):
 await redis.publish("exchange-status", '{"venue":"NASDAQ","status":"down"}')
 ```
 
-### Interview Traps
+Example outputs:
 
-- Using Redis locks without TTL.
-- Assuming Redis pub/sub is durable.
-- Treating Redis as strongly consistent permanent storage.
-- Storing huge objects and causing memory pressure.
+```text
+get_or_create_order("key-1", same_payload_hash) -> returns the original stored response
+get_or_create_order("key-1", different_hash)    -> raises Conflict
+publish("exchange-status", ...)                 -> subscribers receive the message if connected
+```
+
+The idempotency hash prevents the same key from being reused for a different order. The pub/sub example is good for live notifications, but not for durable job processing because disconnected subscribers can miss messages.
+
+### Keep In Mind
+
+Redis is excellent for fast ephemeral state, counters, and coordination, but it is not a relational database replacement. Always set TTLs for temporary keys and understand whether the Redis feature you use is durable.
 
 ### Performance Considerations
 
@@ -270,12 +290,19 @@ ORDER BY created_at DESC
 LIMIT 100;
 ```
 
-### Interview Traps
+Example query result:
 
-- Saying every column should be indexed.
-- Ignoring write penalties.
-- Missing index order for composite indexes.
-- Assuming an index helps low-selectivity predicates like `status = 'ACTIVE'` alone.
+```text
+id     symbol  status  created_at
+ord-9  AAPL    OPEN    2026-05-15 10:01:00
+ord-8  MSFT    OPEN    2026-05-15 09:59:00
+```
+
+The index starts with `account_id` and `status` because the query filters on those columns, then keeps `created_at` in descending order for the `ORDER BY`. `EXPLAIN ANALYZE` verifies whether the database actually uses the index on real data.
+
+### Keep In Mind
+
+Indexes speed reads but slow writes and consume storage. Index real query shapes, not every column, and check selectivity plus index order for composite indexes.
 
 ### Performance Considerations
 
@@ -347,11 +374,19 @@ FULL JOIN exchange_orders e
 WHERE i.client_order_id IS NULL OR e.client_order_id IS NULL;
 ```
 
-### Interview Traps
+Example outputs:
 
-- Putting a right-table condition in `WHERE` after a `LEFT JOIN`, accidentally turning it into an inner join.
-- Joining on non-indexed or non-unique columns.
-- Not handling duplicate rows from one-to-many relationships.
+```text
+INNER JOIN -> only orders that have a matching account
+LEFT JOIN  -> all orders, including orders with no fills yet
+FULL JOIN  -> rows missing on either the internal side or exchange side
+```
+
+The join type controls what happens to missing matches. This matters for reconciliation because the interesting rows are often the ones that exist on one side but not the other.
+
+### Keep In Mind
+
+A `LEFT JOIN` can accidentally become an inner join if right-table filters are placed in `WHERE`. Always think about join cardinality, indexes, and whether one-to-many relationships can duplicate rows.
 
 ### Performance Considerations
 
@@ -417,6 +452,15 @@ COMMIT;
 
 If the final update affects zero rows, rollback and reject for insufficient funds.
 
+Example outcome:
+
+```text
+cash_balance - reserved_cash >= notional -> order is inserted and cash is reserved
+cash_balance - reserved_cash < notional  -> UPDATE affects 0 rows, rollback, reject order
+```
+
+The conditional `UPDATE` protects the balance invariant inside the database. That is safer than reading the balance in the app, checking it, and writing later after another request may have changed it.
+
 ### Isolation Levels
 
 | Level | Prevents | Still allows |
@@ -425,12 +469,9 @@ If the final update affects zero rows, rollback and reject for insufficient fund
 | Repeatable read | Non-repeatable reads | Some phantom/write-skew cases depending on DB |
 | Serializable | Most anomalies | More retries/contention |
 
-### Interview Traps
+### Keep In Mind
 
-- Assuming transactions solve all distributed consistency problems.
-- Doing external HTTP calls inside DB transactions.
-- Holding locks while doing slow work.
-- Ignoring unique constraints for idempotency.
+Transactions protect database invariants, but they do not magically solve cross-service consistency. Keep them short and avoid external HTTP calls while locks are held.
 
 ### Performance Considerations
 

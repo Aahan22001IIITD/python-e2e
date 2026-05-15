@@ -70,13 +70,20 @@ async def list_orders(
     )
 ```
 
-### Interview Traps
+Example output for `GET /v1/accounts/acct-123/orders?status=OPEN&limit=2`:
 
-- Treating REST as only "URLs plus JSON".
-- Forgetting statelessness and storing user/session state in process memory.
-- Using `POST /getOrders` for reads.
-- Returning huge lists without pagination.
-- Breaking response fields without a versioning or migration plan.
+```json
+[
+  {"id": "ord-1", "symbol": "AAPL", "side": "BUY", "quantity": 10, "status": "OPEN"},
+  {"id": "ord-2", "symbol": "MSFT", "side": "SELL", "quantity": 5, "status": "OPEN"}
+]
+```
+
+The URL names the resource being read: orders that belong to one account. The query parameters keep filtering and pagination explicit, and the `x-request-id` lets logs and traces connect this API call to downstream work.
+
+### Keep In Mind
+
+REST is not just "URLs plus JSON"; it is a contract around resources, methods, status codes, pagination, retries, and versioning. Avoid storing request/user state in process memory because a stateless API is much easier to scale and deploy safely.
 
 ### Performance Considerations
 
@@ -156,11 +163,20 @@ async def cancel_order(order_id: str):
     return await order_service.request_cancel(order_id)
 ```
 
-### Interview Traps
+Example outcomes:
 
-- Saying `POST` is never idempotent. It can be made idempotent with a key and persisted result.
-- Assuming `DELETE` means immediate physical deletion. In production it may mean tombstone, cancel requested, or soft delete.
-- Using `PATCH` without defining allowed fields and validation rules.
+```text
+POST /v1/orders                  -> 201 Created with the new order
+PUT /v1/risk-limits/acct-123     -> 200 OK with the replaced config
+PATCH /v1/orders/ord-1           -> 200 OK with the amended order
+DELETE /v1/orders/ord-1          -> 202 Accepted because cancel may finish later
+```
+
+The method tells clients and infrastructure how safe the operation is to retry or cache. The `Idempotency-Key` on `POST` is important because creating an order has side effects, and a client may retry after a timeout.
+
+### Keep In Mind
+
+`POST` can be made idempotent when the server stores the key and original result. `DELETE` does not always mean immediate physical deletion; it may mean cancel requested, soft delete, or tombstone depending on the domain.
 
 ### Performance Considerations
 
@@ -224,12 +240,11 @@ Clients and retry systems use status codes to decide whether to fix input, authe
 }
 ```
 
-### Interview Traps
+This body is useful because the HTTP status explains the class of failure, while the stable `code` explains the business reason. `request_id` lets support find the exact server-side logs, and `retryable` helps clients avoid unsafe retries.
 
-- Returning `500` for validation errors.
-- Returning `404` for auth failures in one endpoint and `403` in another without a policy.
-- Marking business rejection as success without a clear domain status.
-- Retrying all `5xx` without a deadline or idempotency.
+### Keep In Mind
+
+Use `4xx` when the caller must change something and `5xx` when the server or dependency failed. Do not hide failed operations behind `200 {"success": false}` unless you have a very clear domain-level reason.
 
 ### Performance Considerations
 
@@ -305,6 +320,17 @@ async def create_order(order: OrderCreate, user_id: str = Depends(current_user))
     return await order_service.create_order(user_id=user_id, order=order)
 ```
 
+Example behavior:
+
+```text
+Missing Authorization header -> 422 validation error before the handler runs
+Invalid token                 -> 401 from current_user()
+quantity=0                   -> 422 because Field(gt=0) fails
+Valid request                 -> create_order() receives a typed OrderCreate object
+```
+
+FastAPI validates the input before business logic runs, then dependency injection supplies the authenticated user. This keeps the route focused on the action instead of repeating parsing and auth checks in every handler.
+
 ### Middleware Example
 
 ```python
@@ -320,12 +346,11 @@ async def request_metrics(request: Request, call_next):
     return response
 ```
 
-### Interview Traps
+For each request, this middleware emits one latency sample such as `http_request_ms{path="/v1/orders"} 18.4`. That output feeds dashboards and alerts without adding metrics code to every route.
 
-- Calling blocking DB/HTTP clients from `async` handlers.
-- Assuming FastAPI automatically makes CPU-bound code faster.
-- Running development servers in production.
-- Skipping validation because "internal API".
+### Keep In Mind
+
+Async frameworks help most when the slow work is IO and the libraries are async too. CPU-heavy work, blocking clients, and development servers still need proper production handling.
 
 ### Performance Considerations
 
@@ -395,12 +420,19 @@ ORDER BY created_at DESC, id DESC
 LIMIT :limit;
 ```
 
-### Interview Traps
+Example output:
 
-- Designing only the happy path.
-- Ignoring migration/versioning.
-- Omitting idempotency from write APIs.
-- Returning raw database errors to clients.
+```text
+id     created_at           symbol  status
+ord-9  2026-05-15 10:01:00  AAPL    OPEN
+ord-8  2026-05-15 09:59:00  MSFT    OPEN
+```
+
+The query matches the API contract: it filters by account and optional status, returns a bounded page, and orders newest first. Cursor-style pagination avoids scanning and skipping huge offsets on large order tables.
+
+### Keep In Mind
+
+Design the error path and migration path as carefully as the happy path. For write APIs, always explain what happens if the client times out and retries.
 
 ### Performance Considerations
 
@@ -479,12 +511,17 @@ async def access_log(request: Request, call_next):
     return response
 ```
 
-### Interview Traps
+Example log line:
 
-- Doing expensive synchronous work in middleware for every request.
-- Logging sensitive headers or tokens.
-- Assuming middleware order does not matter.
-- Swallowing exceptions and returning misleading success responses.
+```json
+{"event":"http_request","request_id":"req-123","method":"POST","path":"/v1/orders","status_code":201,"latency_ms":12.7}
+```
+
+The middleware guarantees every route gets the same correlation ID and latency logging. Returning the ID in the response also lets the caller share it when reporting a problem.
+
+### Keep In Mind
+
+Middleware runs for every request, so keep it small and predictable. Never log secrets or swallow exceptions in a way that makes a failed request look successful.
 
 ### Performance Considerations
 
@@ -552,12 +589,19 @@ async def create_order(order: OrderCreate, user: User = Depends(require_trader))
     return await order_service.create_order(user.id, order)
 ```
 
-### Interview Traps
+Example outcomes:
 
-- Confusing authentication with authorization.
-- Storing long-lived JWTs with no revocation path.
-- Trusting user IDs from request bodies.
-- Using API keys without scopes, ownership, or rotation.
+```text
+Valid token with trade:write       -> request reaches create_order()
+Valid token without trade:write    -> 403 missing trade permission
+Expired or wrong-audience token    -> verification fails before business logic
+```
+
+The code separates identity from permission. The token proves who the caller is, and the `trade:write` permission proves that caller may create orders.
+
+### Keep In Mind
+
+Authentication answers "who is calling"; authorization answers "what are they allowed to do". Do not trust user IDs supplied in request bodies for sensitive actions.
 
 ### Performance Considerations
 
