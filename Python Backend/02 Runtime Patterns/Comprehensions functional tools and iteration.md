@@ -43,12 +43,30 @@ print(symbols)
 print(qty_by_id)
 ```
 
+Example output:
+
+```text
+['1', '3']
+{'AAPL', 'MSFT'}
+{'1': 100, '2': 0, '3': 50}
+```
+
+The list keeps only open order IDs, the set removes duplicate symbols, and the dict builds a lookup by order ID. The set may print in a different order because sets are unordered.
+
 Generator expression for memory efficiency:
 
 ```python
 total_qty = sum(o["qty"] for o in orders if o["status"] == "open")
 print(total_qty)
 ```
+
+Output:
+
+```text
+150
+```
+
+The generator expression feeds values into `sum` one at a time instead of building a temporary list first.
 
 Readable vs overused:
 
@@ -62,7 +80,7 @@ bad = {o["symbol"]: o["qty"] for o in orders if o["qty"] > 0 and o["status"] == 
 
 ### Edge cases
 
-Late binding trap with lambdas inside comprehensions/loops:
+Late binding warning with lambdas inside comprehensions/loops:
 
 ```python
 funcs = [lambda: i for i in range(3)]
@@ -77,7 +95,7 @@ print([f() for f in fixed])  # [0, 1, 2]
 - Use comprehensions for simple transformations.
 - Use generator expressions for streaming into `sum`, `any`, `all`, `Counter`, etc.
 - Avoid nested unreadable comprehensions in production.
-- Watch closure late-binding traps.
+- Watch closure late-binding behavior.
 
 ---
 
@@ -108,6 +126,15 @@ print(symbols)
 print(nonzero)
 ```
 
+Output:
+
+```text
+['AAPL', 'MSFT']
+[{'symbol': 'AAPL', 'qty': 100}]
+```
+
+`map` transforms each order into a symbol, and `filter` keeps only orders with positive quantity. In everyday Python, the equivalent comprehensions are usually easier to read.
+
 More idiomatic Python:
 
 ```python
@@ -126,17 +153,24 @@ normalized = list(map(normalize_symbol, raw_symbols))
 print(normalized)
 ```
 
+Output:
+
+```text
+['AAPL', 'MSFT', 'NVDA']
+```
+
+A named function makes the transformation reusable and gives better stack traces than a complex lambda.
+
 ### Performance considerations
 
 - `map`/`filter` are lazy in Python 3; convert to `list` only when needed.
 - Comprehensions are often clearer and commonly faster for simple Python-level operations.
 - Named functions improve stack traces and logging.
 
-### Interview traps
+### Things to keep in mind
 
-- Forgetting `map` returns an iterator in Python 3.
-- Using `lambda` for complex business logic.
-- Losing debuggability with anonymous callbacks.
+- `map` and `filter` return iterators in Python 3, so they do nothing until consumed.
+- Keep lambdas tiny; use named functions for business logic, logging, reuse, and debugging.
 
 ### Quick revision
 
@@ -161,6 +195,15 @@ print(next(it))  # 10
 print(next(it))  # 20
 # next(it)       # StopIteration
 ```
+
+Output:
+
+```text
+10
+20
+```
+
+`iter(xs)` creates an iterator over the list. Each `next()` consumes one value, so the iterator moves forward and eventually becomes exhausted.
 
 Why backend systems care:
 
@@ -190,6 +233,16 @@ for delay in RetrySchedule([0.1, 0.2, 0.5]):
     print(delay)
 ```
 
+Output:
+
+```text
+0.1
+0.2
+0.5
+```
+
+The object is its own iterator: `__iter__` returns `self`, and `__next__` returns one delay at a time until it raises `StopIteration`.
+
 Often simpler as a generator:
 
 ```python
@@ -206,6 +259,8 @@ rows = iter([1, 2, 3])
 print(list(rows))  # [1, 2, 3]
 print(list(rows))  # [] already consumed
 ```
+
+Warning: many streaming objects are one-pass. If you need to iterate twice, keep the original collection or intentionally materialize the data with `list()`.
 
 ### Quick revision
 
@@ -243,6 +298,15 @@ for item in parse_lines(["aapl", "", "#comment", "msft"]):
     print(item)
 ```
 
+Output:
+
+```text
+AAPL
+MSFT
+```
+
+The generator skips blank/comment lines and yields cleaned values one at a time. The caller can loop over results without knowing whether they came from a list, file, or network stream.
+
 Streaming large file style:
 
 ```python
@@ -269,6 +333,14 @@ def symbols(rows):
 orders = [{"symbol": "AAPL", "qty": 10}, {"symbol": "MSFT", "qty": 0}]
 print(list(symbols(valid_orders(orders))))  # ['AAPL']
 ```
+
+Output:
+
+```text
+['AAPL']
+```
+
+Each stage does one job: filter valid rows, then extract symbols. This makes pipelines easy to test and avoids building unnecessary intermediate lists.
 
 ### Async relation
 

@@ -42,6 +42,15 @@ def normalize(symbol: str) -> str:
 print(normalize(" aapl "))
 ```
 
+Example output:
+
+```text
+normalize took 0.01ms
+AAPL
+```
+
+The decorator runs code around the real function call without changing the call site. `finally` makes the timing log happen even if the wrapped function raises.
+
 Without `@wraps`, logs, docs, traces, and frameworks may see the function name as `wrapper`.
 
 ### Auth/logging style decorator
@@ -66,6 +75,14 @@ def submit_order(user: dict, symbol: str) -> str:
 print(submit_order({"roles": ["trader"]}, "AAPL"))
 ```
 
+Output:
+
+```text
+accepted AAPL
+```
+
+The outer function receives the decorator argument (`"trader"`), the middle function receives the target function, and the wrapper checks the user before calling the target.
+
 ### FastAPI/Flask relevance
 
 ```python
@@ -82,18 +99,10 @@ print(submit_order({"roles": ["trader"]}, "AAPL"))
 
 Framework decorators register functions with routing tables, dependency systems, and OpenAPI metadata.
 
-### Interview traps/questions
+### Things to keep in mind
 
-- What is a closure?
-  Answer: A closure is a function that remembers variables from its enclosing scope after that scope has returned. Decorators use this to keep access to the wrapped function or decorator arguments.
-- Why use `functools.wraps`?
-  Answer: `functools.wraps` copies metadata like `__name__`, `__doc__`, annotations, and `__wrapped__`, which helps logs, docs, debuggers, tracing, and web frameworks.
-- How do decorators with arguments work?
-  Answer: A decorator with arguments is usually three layers: the outer function receives decorator config, the middle function receives the target function, and the inner wrapper runs around the target call.
-- How do you preserve return values and exceptions?
-  Answer: Preserve return values with `return fn(...)`; preserve exceptions by not swallowing them unless intentional. Use `try` / `finally` for cleanup or timing that must happen on both success and failure.
-- Can decorators wrap async functions?
-  Answer: Yes, but the wrapper must be `async def` and must `await fn(...)`; otherwise the decorator returns a coroutine object without executing it correctly.
+- Always return the wrapped function's result and use `functools.wraps` so logs, docs, tracing, and frameworks see the original metadata.
+- Async functions need async wrappers that `await fn(...)`; a normal wrapper changes the behavior in surprising ways.
 
 Async decorator edge case:
 
@@ -160,6 +169,16 @@ with Connection() as conn:
     conn.send("order")
 ```
 
+Output:
+
+```text
+open
+send order
+close
+```
+
+`__enter__` acquires the resource and returns the object used inside the block. `__exit__` runs after the block, even when the block fails, which is why this pattern is common for files, locks, DB sessions, and tracing spans.
+
 ### `contextlib` version
 
 ```python
@@ -177,6 +196,16 @@ with lock_name("risk"):
     print("critical section")
 ```
 
+Output:
+
+```text
+acquire risk
+critical section
+release risk
+```
+
+The code before `yield` is setup, and the `finally` block is cleanup. This is often simpler than writing a full class when the context manager only wraps one resource.
+
 ### Edge case: suppressing exceptions
 
 ```python
@@ -193,7 +222,13 @@ with SuppressValueError():
 print("continued")
 ```
 
-Production warning: suppressing exceptions can hide incidents. Use narrowly and log intentionally.
+Output:
+
+```text
+continued
+```
+
+Warning: returning `True` from `__exit__` suppresses the exception. Use this narrowly and log intentionally, because hidden exceptions can hide incidents.
 
 ### Quick revision
 
@@ -237,7 +272,7 @@ def get_quote(symbol: str) -> dict:
         raise ExchangeUnavailable(symbol) from exc
 ```
 
-`raise ... from exc` preserves causal chains.
+`raise ... from exc` preserves the causal chain: callers see the domain error, and debugging still has the original timeout.
 
 ### Bad pattern
 
@@ -279,18 +314,17 @@ finally:
     print("cleanup always runs")
 ```
 
-### Interview traps/questions
+Output:
 
-- Why is `except Exception: pass` dangerous?
-  Answer: `except Exception: pass` hides bugs, loses stack traces, and can make failed orders, dropped messages, or bad state look successful.
-- When should you use custom exceptions?
-  Answer: Use custom exceptions at domain boundaries when callers need to distinguish business failures from low-level errors, such as `ExchangeUnavailable`, `RiskLimitExceeded`, or `InvalidOrder`.
-- What is exception chaining?
-  Answer: Exception chaining links a higher-level error to the original cause with `raise NewError(...) from exc`, preserving debugging context across abstraction layers.
-- Which operations are safe to retry?
-  Answer: Retrying is safe for transient failures only when the operation is idempotent or has deduplication/idempotency keys. Blindly retrying order placement can duplicate trades.
-- Why should logs include correlation/order/request IDs?
-  Answer: Correlation, order, and request IDs let you connect logs across services, retries, queues, and exchange calls during incident debugging.
+```text
+use socket
+cleanup always runs
+```
+
+### Things to keep in mind
+
+- Catch specific exceptions where you can add context, recover, retry, or translate the error for a caller.
+- Preserve stack traces with `raise` or `raise ... from exc`; avoid `except Exception: pass` because it turns real failures into silent bad state.
 
 ### Quick revision
 

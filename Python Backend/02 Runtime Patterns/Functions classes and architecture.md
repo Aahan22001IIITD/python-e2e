@@ -29,6 +29,16 @@ def log_event(event: str, *tags: str, **fields) -> None:
 log_event("order.accepted", "trading", venue="NASDAQ", symbol="AAPL")
 ```
 
+Output:
+
+```text
+event: order.accepted
+tags: ('trading',)
+fields: {'venue': 'NASDAQ', 'symbol': 'AAPL'}
+```
+
+`*tags` collects extra positional arguments into a tuple, and `**fields` collects keyword arguments into a dict. This is useful for wrappers and logging helpers where the number of extra fields is flexible.
+
 Unpacking:
 
 ```python
@@ -40,6 +50,14 @@ kwargs = {"venue": "NASDAQ"}
 
 print(submit_order(*args, **kwargs))
 ```
+
+Output:
+
+```text
+{'symbol': 'AAPL', 'qty': 100, 'venue': 'NASDAQ'}
+```
+
+Unpacking does the reverse: `*args` fills positional parameters and `**kwargs` fills keyword parameters. It is common in adapters and decorators that forward calls.
 
 Decorator wrapper:
 
@@ -104,7 +122,7 @@ class ExchangeConfig:
 
     @classmethod
     def from_env(cls, env: dict[str, str]):
-        return cls(venue=env["VENUE"], endpoint=env["ENDPOINT"])
+        return cls(venue=cls.normalize_venue(env["VENUE"]), endpoint=env["ENDPOINT"])
 
     @staticmethod
     def normalize_venue(venue: str) -> str:
@@ -114,6 +132,15 @@ cfg = ExchangeConfig.from_env({"VENUE": " nasdaq ", "ENDPOINT": "tcp://feed"})
 print(cfg.venue, cfg.endpoint)
 print(ExchangeConfig.normalize_venue(" nyse "))
 ```
+
+Output:
+
+```text
+NASDAQ tcp://feed
+NYSE
+```
+
+`from_env` is a class method because it constructs an instance and should keep working for subclasses. `normalize_venue` is a static method because it does not need instance or class state.
 
 Subclass-friendly factory:
 
@@ -133,11 +160,18 @@ client = TestClient.from_config({"endpoint": "mock://exchange"})
 print(type(client).__name__)  # TestClient
 ```
 
-### Interview traps
+Output:
 
-- `staticmethod` does not receive class or instance.
-- `classmethod` is better for alternative constructors.
-- Do not use classes only to group static methods if a module function is clearer.
+```text
+TestClient
+```
+
+Because the factory calls `cls(...)`, `TestClient.from_config(...)` returns a `TestClient`, not a `BaseClient`.
+
+### Things to keep in mind
+
+- Use `@classmethod` for alternative constructors and subclass-aware factories; use `@staticmethod` only when namespacing a helper genuinely improves clarity.
+- Do not create classes just to group unrelated static methods; a module-level function is often simpler.
 
 ### Quick revision
 
@@ -184,6 +218,15 @@ print(submit(NasdaqConnector()))
 print(submit(MockConnector()))
 ```
 
+Output:
+
+```text
+NASDAQ accepted AAPL x 100
+MOCK accepted AAPL x 100
+```
+
+`submit` depends on the `ExchangeConnector` interface, not one concrete class. That lets production code use a real connector while tests use a mock connector with the same method.
+
 Composition example:
 
 ```python
@@ -215,6 +258,11 @@ class OrderService:
 - Overriding methods without respecting base-class invariants.
 - Using inheritance for code reuse when composition or a helper function is clearer.
 - Forgetting that Python uses dynamic dispatch: method call resolved by runtime type.
+
+### Things to keep in mind
+
+- Inheritance is best for stable `is-a` relationships; composition is better when behavior changes independently.
+- Keep interfaces small and explicit so connectors, storage backends, and test doubles can be swapped cleanly.
 
 ### Quick revision
 

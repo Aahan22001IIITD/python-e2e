@@ -41,6 +41,14 @@ with path.open("r", encoding="utf-8") as f:
 print(symbols)
 ```
 
+Output:
+
+```text
+['AAPL', 'MSFT']
+```
+
+The example writes a tiny file, reads it back safely with a context manager, strips whitespace, and skips empty lines. This is the same shape as reading symbol lists, config files, and small operational inputs.
+
 Streaming large file:
 
 ```python
@@ -63,6 +71,8 @@ def write_config_atomic(path: Path, content: str) -> None:
     tmp.write_text(content, encoding="utf-8")
     os.replace(tmp, path)  # atomic replace on same filesystem
 ```
+
+Writing to a temporary file first avoids leaving a half-written target file if the process crashes mid-write. `os.replace` swaps the completed temp file into place on the same filesystem.
 
 ### Edge cases
 
@@ -135,6 +145,15 @@ parsed = json.loads(text)
 print(parsed["symbol"])
 ```
 
+Output:
+
+```text
+{"symbol":"AAPL","qty":100,"urgent":true}
+AAPL
+```
+
+`json.dumps` turns Python data into JSON text for APIs or storage. `json.loads` parses that text back into Python values, after which the application should validate required fields and types.
+
 Parsing errors:
 
 ```python
@@ -147,6 +166,14 @@ try:
 except json.JSONDecodeError as exc:
     print("bad JSON", exc.msg, exc.pos)
 ```
+
+Output:
+
+```text
+bad JSON Expecting property name enclosed in double quotes 19
+```
+
+The parser tells you where the syntax broke. In an API, translate this into a clean validation error instead of returning a generic server failure.
 
 API validation style:
 
@@ -195,7 +222,15 @@ data = json.loads(raw, parse_float=Decimal)
 print(data["price"], type(data["price"]))
 ```
 
-NaN trap:
+Output:
+
+```text
+100.10 <class 'decimal.Decimal'>
+```
+
+Using `parse_float=Decimal` keeps decimal precision at parse time. This matters for prices, cash, and risk calculations where binary floating-point surprises are unacceptable.
+
+NaN warning:
 
 ```python
 import json
@@ -208,6 +243,15 @@ try:
 except ValueError as exc:
     print("strict JSON rejected NaN")
 ```
+
+Output:
+
+```text
+{"x": NaN}
+strict JSON rejected NaN
+```
+
+Python allows `NaN` by default even though strict JSON does not. Use `allow_nan=False` when the output must be accepted by strict parsers.
 
 ### Performance concerns
 
@@ -229,18 +273,10 @@ def read_ndjson(path: str):
                 raise ValueError(f"bad JSON on line {line_no}") from exc
 ```
 
-### Interview traps/questions
+### Things to keep in mind
 
-- Why is `datetime` not JSON serializable by default?
-  Answer: `datetime` has no single universal JSON representation. Choose an explicit format, usually ISO 8601 in UTC, and parse it intentionally on input.
-- Why avoid floats for money?
-  Answer: Floats use binary floating-point and can represent values like `100.10` imprecisely. Use `Decimal` or integer minor units for prices, cash, and risk-sensitive values.
-- How do you handle malformed JSON in an API?
-  Answer: Catch `json.JSONDecodeError`, return a clear 400-style validation error, and avoid leaking raw parser internals to clients. Log enough context for debugging without logging sensitive payloads.
-- What is NDJSON and why is it useful for logs?
-  Answer: NDJSON is newline-delimited JSON: one JSON object per line. It is useful for logs and streams because producers and consumers can process records incrementally.
-- How do you avoid reading a huge JSON file into memory?
-  Answer: Avoid loading huge JSON files by streaming when possible: use NDJSON, chunked parsing libraries, pagination, or a file format designed for large datasets.
+- JSON parsing is only syntax validation; still validate required fields, types, ranges, and business rules.
+- Be explicit with datetime, `Decimal`, `NaN`, and large files because defaults are often not good enough for backend or finance systems.
 
 ### Quick revision
 

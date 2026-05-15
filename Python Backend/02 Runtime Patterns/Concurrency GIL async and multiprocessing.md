@@ -49,6 +49,15 @@ for t in threads:
     t.join()
 ```
 
+Possible output:
+
+```text
+quote AAPL
+quote MSFT
+```
+
+The order can change because both threads run independently while they wait. This example is useful for IO-style work: the program can start another request while one request is sleeping or waiting on the network.
+
 ### Multiprocessing example: CPU work
 
 ```python
@@ -61,6 +70,14 @@ if __name__ == "__main__":
     with Pool() as pool:
         print(pool.map(score, [10_000, 20_000, 30_000]))
 ```
+
+Output:
+
+```text
+[333283335000, 2666466670000, 8999550005000]
+```
+
+Each process has its own Python interpreter, so CPU-heavy Python code can run in parallel instead of fighting for the same GIL. The tradeoff is that inputs and outputs must be sent between processes, which adds overhead.
 
 Memory implication:
 
@@ -85,6 +102,8 @@ for t in threads: t.join()
 
 print(counter)  # can be less than expected depending on runtime/interleavings
 ```
+
+The final value is not a reliable contract. `counter += 1` looks like one operation, but it is a read-modify-write sequence, so another thread can interleave and overwrite progress.
 
 Safe version:
 
@@ -188,6 +207,14 @@ async def main():
 asyncio.run(main())
 ```
 
+Output:
+
+```text
+['AAPL=100.00', 'MSFT=100.00', 'NVDA=100.00']
+```
+
+`asyncio.gather` starts the coroutines together and waits for all of them. This is why async is a strong fit for many independent network calls: while one call waits, the event loop can run another coroutine.
+
 ### FastAPI-style relevance
 
 ```python
@@ -216,7 +243,17 @@ async def consume():
 asyncio.run(consume())
 ```
 
-### Common async mistakes
+Output:
+
+```text
+{'symbol': 'AAPL', 'price': 100.1}
+{'symbol': 'AAPL', 'price': 100.2}
+{'symbol': 'AAPL', 'price': 99.9}
+```
+
+This pattern matches streaming responses and WebSocket consumers: events arrive over time, and the consumer handles each one without storing the full stream.
+
+### Things to keep in mind
 
 ```python
 import asyncio
@@ -237,7 +274,7 @@ async def bad_cpu_handler():
     return sum(i * i for i in range(10_000_000))
 ```
 
-Use process pools/work queues for serious CPU work.
+Warnings: do not call blocking libraries or CPU-heavy loops directly inside async handlers. Use async clients for IO, and use process pools or worker queues for serious CPU work.
 
 ### Performance considerations
 
@@ -276,15 +313,7 @@ async def guarded_call(symbol: str):
 | Shared in-memory cache updates  | locks or single owner task       | Avoid races                     |
 | Ultra-low-latency hot path      | avoid unnecessary concurrency    | Predictability beats cleverness |
 
-### Interview traps/questions
+### Things to keep in mind
 
-- Does the GIL prevent all race conditions?
-  Answer: No. The GIL does not prevent logical race conditions. Operations that look simple can still interleave across multiple steps, and shared mutable state still needs locks, queues, or single-owner design.
-- Why can threads help IO but not CPU-bound Python?
-  Answer: Threads help IO-bound work because blocking network, disk, and DB calls can release the GIL while another thread runs. CPU-bound Python bytecode still competes for the GIL, so multiple threads usually do not give parallel speedup.
-- What happens if you call blocking code in an async handler?
-  Answer: Blocking code in an async handler stalls the event loop, delaying every other coroutine on that loop. Use async libraries, `await asyncio.sleep(...)`, executor offload, process pools, or a worker queue depending on the work.
-- When would multiprocessing hurt performance?
-  Answer: Multiprocessing can hurt when tasks are small, data is large to pickle, processes start frequently, memory duplication is high, or IPC costs dominate the actual computation.
-- How do you prevent async overload?
-  Answer: Prevent async overload with explicit limits: timeouts, semaphores, bounded queues, backpressure, cancellation handling, and downstream-aware rate limits.
+- The GIL does not make shared data logically safe; use locks, queues, or single-owner design for mutable state.
+- Multiprocessing and async both have overhead, so match the tool to the bottleneck: CPU work, IO wait, or downstream capacity.
