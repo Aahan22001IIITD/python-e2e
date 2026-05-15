@@ -1,6 +1,8 @@
-# Python: mutable vs immutable (backend / HFT interviews)
+# Python: mutable vs immutable
 
 Tags: #python #memory-model #concurrency #interview
+
+This note explains mutability in simple backend terms: what changes in place, what creates a new object, and why shared objects can cause bugs.
 
 ---
 
@@ -8,72 +10,125 @@ Tags: #python #memory-model #concurrency #interview
 
 | Concept | Meaning |
 | --- | --- |
-| **Immutable** | Object’s *value* (the data it represents) cannot be changed in place. Operations that “modify” it return a **new** object. |
-| **Mutable** | Object’s internal state can be changed **in place**; other references see the same object update. |
-| **Identity** | `id(x)` / `x is y` — *which* object in memory. |
-| **Equality** | `x == y` — same *value* (per `__eq__`). |
+| Immutable | The object's value cannot change in place. A "change" creates or points to another object. |
+| Mutable | The object's contents can change in place. Other names pointing to it see the change. |
+| Identity | `x is y`: both names point to the same object. |
+| Equality | `x == y`: both objects have the same value. |
 
-**Immutable built-ins (common):** `int`, `float`, `complex`, `bool`, `str`, `bytes`, `tuple` (of immutable elements), `frozenset`, `None`, many `datetime` values (treat as immutable *in use*; some types have internal optimization detail).
+Common immutable built-ins: `int`, `float`, `bool`, `str`, `bytes`, `tuple` of immutable values, `frozenset`, `None`.
 
-**Mutable built-ins:** `list`, `dict`, `set`, `bytearray`, most user-defined instances unless you freeze them (`dataclass(frozen=True)` only affects attribute assignment—not deep immutability of nested mutables).
+Common mutable built-ins: `list`, `dict`, `set`, `bytearray`, and most normal class instances.
 
-**Interview line:** Immutability is a property of **object type + how you use it**, not Python variables. Variables are **names bound to objects**.
+Key idea: Python variables are names bound to objects. The variable itself is not mutable or immutable; the object is.
 
 ---
 
-## Memory behavior
+## Assignment and mutation
 
-- Assignment **rebinds the name**, it does not copy objects: `a = b` makes both names refer to the **same object** unless you explicitly copy.
-- Small integers and some strings may be **interned/cached** (CPython detail). Do **not** rely on `is` for equality of values; rely on `==`.
-- Mutable objects allocate **fixed header + grows** (lists over-allocate); appending often amortized O(1), but **capacity** grows. Immutable “updates” (e.g. string concat in a loop) create **many** short-lived objects → GC pressure.
-- **Copy semantics:** `copy.copy` is shallow; nested mutables are still shared. `copy.deepcopy` is recursive and expensive.
+Assignment does not copy. It gives another name to the same object unless you explicitly create a copy.
 
 ```python
 a = [1, 2]
 b = a
-b.append(3)   # a is [1, 2, 3] — same list object
+b.append(3)
 
+print(a)
+print(a is b)
+```
+
+Output:
+
+```text
+[1, 2, 3]
+True
+```
+
+Why: `a` and `b` point to the same list. Mutating the list through `b` is visible through `a`.
+
+Immutable values behave differently:
+
+```python
 s = "hi"
 t = s
-# s += "!"  # binds s to a NEW str; t still "hi"
+s += "!"
+
+print(s)
+print(t)
+print(s is t)
 ```
+
+Output:
+
+```text
+hi!
+hi
+False
+```
+
+Why: strings are immutable, so `s += "!"` creates a new string and rebinds `s`. `t` still points to the old string.
+
+Keep in mind: use explicit copies only when you need isolation. Copying everything by default can make code slower and harder to reason about.
 
 ---
 
-## Examples (identity vs mutation)
+## Function arguments
+
+Python passes object references by assignment. A function can mutate a mutable object it receives, but rebinding a local name does not change the caller's name.
 
 ```python
-x = [1, 2, 3]
-y = x
-y[0] = 99
-assert x[0] == 99  # same list
-
-u = (1, 2, 3)
-# u[0] = 0  # TypeError: tuple is immutable
-
 def bump(n: int) -> None:
-    n = n + 1   # rebinds local n; caller unchanged
+    n = n + 1
 
-def bump_list(xs: list) -> None:
-    xs.append(1)  # mutates caller's object if same reference
+
+def bump_list(xs: list[int]) -> None:
+    xs.append(1)
+
+
+count = 10
+items = [10]
+
+bump(count)
+bump_list(items)
+
+print(count)
+print(items)
 ```
+
+Output:
+
+```text
+10
+[10, 1]
+```
+
+Why: `bump` only rebinds local `n`. `bump_list` mutates the list object that `items` also points to.
 
 ---
 
-## Mutable default argument pitfalls
+## Mutable default arguments
 
-**The trap:** Default arguments are evaluated **once** at **function definition** time, not each call.
+Default arguments are evaluated once when the function is defined. If the default is a list or dict, all calls share it.
 
 ```python
-def append_one(item, bag=[]):  # DON'T
+def append_one(item, bag=[]):
     bag.append(item)
     return bag
 
-a = append_one(1)  # [1]
-b = append_one(2)  # [1, 2] — surprise: shared `bag`
+
+print(append_one(1))
+print(append_one(2))
 ```
 
-**Fixes:**
+Output:
+
+```text
+[1]
+[1, 2]
+```
+
+Why: both calls reuse the same default `bag` list.
+
+Use `None` and create a fresh list:
 
 ```python
 def append_one(item, bag=None):
@@ -83,134 +138,244 @@ def append_one(item, bag=None):
     return bag
 ```
 
-**Interview angle:** Explains weird “stateful” functions, flaky tests, and cross-request leakage if someone misuses this in a long-lived process.
+Keep in mind: this is a common source of flaky tests and cross-request state leaks in long-running backend workers.
 
 ---
 
 ## Strings vs lists
 
-| | `str` | `list` |
+Strings are immutable. Lists are mutable.
+
+| Operation | `str` | `list` |
 | --- | --- | --- |
-| Character / element update | No — new `str` | Yes — in place |
-| Concat many times | Often O(n²) if done naïvely | Amortized O(n) with `append` |
-| Hashable | Yes (if str) | No |
-| Use as dict key | Yes | No (unhashable) |
+| Change one element | No | Yes |
+| Build many parts | Use `"".join(parts)` | Use `append` |
+| Hashable | Yes | No |
+| Dict key | Yes | No |
 
 ```python
-# Bad in hot paths: repeated str concat
+parts = ["order", "-", "123"]
+
 s = ""
 for chunk in parts:
-    s += chunk   # new string each iteration
+    s += chunk
 
-# Better: list + join
-s = "".join(parts)
+joined = "".join(parts)
+
+print(s)
+print(joined)
 ```
 
-**Bytes note:** `bytes` is immutable; `bytearray` is mutable—relevant for parsers, sockets, zero-copy style code.
+Output:
+
+```text
+order-123
+order-123
+```
+
+Why: both produce the same string, but repeated `+=` creates intermediate strings. `join` builds the final string more directly.
+
+Keep in mind: for small strings clarity matters more. In loops or hot paths, prefer collecting parts and joining once.
 
 ---
 
 ## Tuples containing mutable objects
 
-The **tuple** is immutable: you cannot reassign **which** object sits at index `i`, but if that object is mutable, **its contents** can change.
+A tuple prevents replacing its slots, but it does not freeze mutable objects inside it.
 
 ```python
 t = ([1], 2)
-t[0].append(2)   # OK: mutating the list inside
-# t[0] = []      # TypeError: tuple assignment
+t[0].append(2)
 
-# tuple hash only if all elements are hashable
-d = {}
-# d[t] = 1       # TypeError if t contains unhashable nested list
+print(t)
 ```
 
-**Interview trap:** Saying “tuples are read-only copies of data” — false for nested structures. Use `typing.Tuple` docs + shallow vs deep semantics.
+Output:
 
----
+```text
+([1, 2], 2)
+```
 
-## Interview traps
+Why: the tuple still points to the same inner list, and that list can be mutated.
 
-1. **`is` vs `==`:** `is` is identity; equality is value. Cached small ints `(a is b)` sometimes “works”; never part of portable logic.
-2. **Thinking assignment copies:** It does not; use `list(x)`, `x[:]`, `copy.copy`, or comprehension as needed.
-3. **Frozen dataclass myths:** Attributes can’t be reassigned, but a `list` field can still `.append()` unless you enforce immutability (e.g. tuples, Mapping, third-party immutable collections).
-4. **Default args** and **late binding in closures/lambdas in loops** (`lambda: i` capturing one `i`) — sibling foot-guns often asked together.
+Hashability also depends on every element:
 
 ```python
-funcs = [lambda: i for i in range(3)]
-[f() for f in funcs]  # often [2, 2, 2] — one shared i
+good_key = ("NASDAQ", "AAPL")
+bad_key = ("NASDAQ", ["AAPL"])
+
+print(isinstance(hash(good_key), int))
 ```
 
-5. **`+=` on lists:** `x += [1]` calls `__iadd__` — **mutates** in place. `x = x + [1]` binds new list. Subtle differences with other references watching `x`.
+Output:
+
+```text
+True
+```
+
+Why: `good_key` contains only hashable values. `bad_key` cannot be used as a dict key because it contains a list.
+
+Keep in mind: use tuples of immutable values for dict keys, cache keys, and stable records.
 
 ---
 
-## Performance implications
+## `is` vs `==`
 
-- **Allocations:** Immutable “changes” multiply objects → **allocation rate**, cache misses, GC pauses matter in **HFT / low-latency** paths (still often secondary to I/O and algorithm, but real in hot loops).
-- **Sharing:** Immutables are safe to share without defensive copies; mutables often need **copy-on-write** discipline or immutable data structures (`tuple`, `frozenset`, persistent structures in some libs).
-- **Dict/set keys:** Require **hashable** (immutable-ish) keys; mutating an object while it conceptually participates in hashing breaks invariants (**never mutate `__hash__`-ed mutable content**).
+`is` checks identity. `==` checks value.
 
 ```python
-# Anti-pattern
-d = {}
-k = []
-d[id(k)] = "..."  # not using list as key, but illustrating: mutating keys is invalid
+x = [1, 2]
+y = [1, 2]
+
+print(x == y)
+print(x is y)
 ```
 
-- **Structural sharing:** Understand **shallow copy cost** vs **deep copy** for large graphs (risk in serialization, config merges).
+Output:
 
----
+```text
+True
+False
+```
 
-## Threading / concurrency
+Why: the lists have the same contents but are different objects.
 
-CPython **`threading`** + **GIL:** One thread executes Python bytecode at a time; GIL reduces **race on single bytecode ops** but **does not** make multi-step updates atomic.
+Use `is` for `None`:
 
 ```python
-# Not atomic across threads despite GIL illusion in simple tests
-balance += amount   # READ-modify-WRITE race with another thread
-if key in d:
-    d[key].append(x)  # still racy: another thread may delete key
+timeout = None
+
+print(timeout is None)
 ```
 
-**Implications:**
+Output:
 
-- **Mutable shared state** between threads needs **locks** (`threading.Lock`), **queues**, or **immutable message passing** (copy data or use immutable snapshots).
-- **`multiprocessing`:** Separate memory — mutating in child doesn’t touch parent unless using shared proxies; deserialization often creates **fresh** mutable copies (watch **stale caches** across processes).
+```text
+True
+```
 
-**Interview answer structure:** Identify **shared mutable** → define **critical sections** → prefer **immutable snapshots** / **structures with clear ownership** → if async, cooperative multitasking doesn’t preempt mid-bytecode identically everywhere but logical races on shared dicts/lists still occur.
+Why: `None` is a singleton, so identity is the correct check.
+
+Keep in mind: small integers and some strings may be reused by CPython internally. Do not use `is` for normal value comparison.
 
 ---
 
-## Common bugs in production systems
+## Frozen dataclasses
+
+`frozen=True` prevents assigning a new value to a field. It does not make nested mutable objects immutable.
+
+```python
+from dataclasses import dataclass, field
+
+
+@dataclass(frozen=True)
+class Config:
+    checks: list[str] = field(default_factory=list)
+
+
+c = Config()
+c.checks.append("max_qty")
+
+print(c.checks)
+```
+
+Output:
+
+```text
+['max_qty']
+```
+
+Why: `c.checks = []` would be blocked, but mutating the existing list is still allowed.
+
+Use tuples when you want a simple deeply immutable collection:
+
+```python
+@dataclass(frozen=True)
+class SafeConfig:
+    checks: tuple[str, ...]
+```
+
+---
+
+## Performance notes
+
+Immutable "changes" create new objects. Mutable changes can update existing objects. Neither is always better; choose based on the data model and the code path.
+
+```python
+parts = ["a", "b", "c"]
+
+slow_style = ""
+for part in parts:
+    slow_style += part
+
+fast_style = "".join(parts)
+
+print(slow_style == fast_style)
+```
+
+Output:
+
+```text
+True
+```
+
+Why: repeated string concatenation may allocate many intermediate strings. `join` builds the result once from the collected parts.
+
+Keep in mind: in request loops, parsers, and low-latency paths, repeated allocation and unnecessary deep copies can show up in tail latency.
+
+---
+
+## Threading and concurrency
+
+The GIL does not make multi-step business logic safe. Shared mutable state still needs ownership or synchronization.
+
+```python
+import threading
+
+limits = {"AAPL": 100}
+lock = threading.Lock()
+
+
+def update_limit(symbol: str, value: int) -> None:
+    with lock:
+        limits[symbol] = value
+```
+
+Why: the lock makes the update section explicit. Without a clear owner or lock, multiple threads can read and write shared dict/list state in unexpected orders.
+
+For multiprocessing, each process usually has separate memory. Mutating an object in a child process does not update the parent's normal Python object unless you use shared memory or a managed proxy.
+
+---
+
+## Common production bugs
 
 | Pattern | Failure mode |
 | --- | --- |
-| Shared mutable **default** args / caches on module-level globals | Cross-request bleed in HTTP workers, flaky tests |
-| Passing **nested dict/list** configs without deep copy | One service mutates “constants” affecting others |
-| **Shallow copy** before passing to callbacks |Callee mutates nested list — caller corrupted |
-| “Return internal list” anti-pattern (`return self._items`) | Caller mutates protected state |
-| Concurrency **check-then-act** on dict/list/set | TOCTOU races under threads |
-| C extension / `numpy` semantics | Bypass Python-level expectations; mutate buffers out of sight |
-| **Logging / repr** holding references to huge mutable structures | Keeps graphs alive unintentionally |
+| Mutable default args | State leaks between calls or tests |
+| Module-level mutable caches | Cross-request bleed in long-running workers |
+| Shallow copy of nested config | One component mutates another component's data |
+| Returning `self._items` directly | Caller mutates internal state |
+| Check-then-act on shared dict/list/set | Race between the check and the update |
+| Holding references in logs or callbacks | Large mutable graphs stay alive longer than expected |
 
-**Defensive patterns:** Return `tuple(self._items)`, `MappingProxyType`, copy at boundaries, document ownership (“caller must not mutate”), use locks or process isolation.
+Safer patterns: return `tuple(self._items)`, copy at boundaries, document ownership, use immutable values for snapshots, and use locks or queues for shared mutable state.
 
 ---
 
 ## Quick revision summary
 
-- **Immutable:** cannot change value in place; rebinding or new object. **Mutable:** in-place change; **aliases see updates**.
-- **Assignment shares references;** use explicit copies when isolation is required.
-- **Mutable defaults** bind once — use `None` + fresh object per call.
-- **Tuple immutability** is **shallow**; nested lists still mutate.
-- **`str` concat in loops** can be costly; **`list` + `join`** for building text.
-- **Performance:** allocation churn on immutables; hashable keys need stable contents.
-- **Threads:** GIL ≠ thread safety for multi-step logic; **lock** or **don’t share mutables**.
-- **Production bugs:** shared caches, shallow copies, exposing internal collections, TOCTOU races.
+- Immutable objects cannot change in place; mutable objects can.
+- Assignment shares references; it does not copy.
+- Mutable defaults are shared across calls, so use `None` plus a fresh object.
+- Tuple immutability is shallow if it contains mutable objects.
+- Use `==` for values and `is` for `None`/singletons.
+- Use `join` for building strings from many parts.
+- Hash keys must stay stable.
+- The GIL does not make multi-step shared-state logic safe.
 
 ---
 
 ## See also
 
-- [[Interview]] — link this note from your workbook’s technical section.
-- [[Welcome]] — vault index
+- [[Interview]]
+- [[Welcome]]

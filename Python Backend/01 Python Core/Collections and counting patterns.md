@@ -1,39 +1,27 @@
- # Collections and counting patterns
+# Collections and counting patterns
 
 Tags: #python #collections #defaultdict #deque #counter #backend #hft
 
-Use `collections` when the data structure expresses intent better than manual dict/list code. In interviews, these often appear in log processing, queues, sliding windows, frequency counts, and streaming systems.
+Use `collections` when the data structure says what the code is doing. These tools are common in grouping, queues, sliding windows, frequency counts, and log analysis.
 
 ---
 
 ## Practical overview
 
-| Tool                       | Use when                                     | Backend/HFT example             |
-| -------------------------- | -------------------------------------------- | ------------------------------- |
-| `defaultdict`              | Missing keys should initialize automatically | group orders by venue           |
-| `deque`                    | Fast append/pop from both ends               | rolling window, in-memory queue |
-| `Counter`                  | Frequency counts and top-k                   | most common error codes/symbols |
-| `namedtuple` / `dataclass` | Lightweight records                          | market data event shape         |
-| `OrderedDict`              | Ordered map / simple LRU patterns            | legacy or custom cache behavior |
-| `ChainMap`                 | Layered config lookup                        | env overrides over defaults     |
+| Tool | Use when | Backend example |
+| --- | --- | --- |
+| `defaultdict` | Missing keys should create a default value | group orders by venue |
+| `deque` | Need fast append/pop from both ends | queue or rolling window |
+| `Counter` | Need frequencies or top-k values | most common error codes |
+| `namedtuple` / `dataclass` | Need a lightweight record | market data event |
+| `OrderedDict` | Need ordered map behavior | simple cache/LRU logic |
+| `ChainMap` | Need layered lookup | env config over defaults |
 
 ---
 
 ## `defaultdict`
 
-### Concept
-
-`defaultdict(factory)` calls `factory()` when a missing key is accessed.
-
-Why backend systems care:
-
-- Avoids repetitive `if key not in d` code.
-- Useful for grouping, aggregating, counting, routing, and metrics buckets.
-- Mistake: reading a missing key creates it, which can grow state unexpectedly.
-
-### Runnable examples
-
-Grouping orders by venue:
+`defaultdict(factory)` calls `factory()` when a missing key is accessed with `d[key]`. It is useful when every missing key should start with the same kind of empty value.
 
 ```python
 from collections import defaultdict
@@ -52,7 +40,15 @@ for order in orders:
 print(by_venue["NASDAQ"])
 ```
 
-Counting without `Counter`:
+Output:
+
+```text
+[{'id': '1', 'venue': 'NASDAQ', 'symbol': 'AAPL'}, {'id': '3', 'venue': 'NASDAQ', 'symbol': 'MSFT'}]
+```
+
+Why: `defaultdict(list)` creates a fresh empty list for each new venue, then the order is appended to that list.
+
+Counting can also use `defaultdict(int)`:
 
 ```python
 from collections import defaultdict
@@ -61,86 +57,49 @@ counts = defaultdict(int)
 for code in [200, 500, 200, 429]:
     counts[code] += 1
 
-print(dict(counts))  # {200: 2, 500: 1, 429: 1}
+print(dict(counts))
 ```
 
-Edge case:
+Output:
+
+```text
+{200: 2, 500: 1, 429: 1}
+```
+
+Why: `int()` returns `0`, so the first `+= 1` works even when the key is new.
+
+`d[key]` and `d.get(key)` behave differently on missing keys:
 
 ```python
 from collections import defaultdict
 
 groups = defaultdict(list)
-print(groups["missing"])  # [] and key now exists
-print("missing" in groups)  # True
 
-# Use `.get()` when you do not want insertion:
-print(groups.get("another_missing"))  # None
+print(groups["missing"])
+print("missing" in groups)
+
+print(groups.get("other"))
+print("other" in groups)
 ```
 
-### Interview traps/questions
+Output:
 
-- What is the difference between `d[key]` and `d.get(key)` on a `defaultdict`?
+```text
+[]
+True
+None
+False
+```
 
-  Answer: `d[key]` triggers the default factory on a missing key and inserts the generated value. `d.get(key)` reads without inserting.
+Why: `groups["missing"]` inserts a new list. `groups.get("other")` reads without inserting.
 
-  ```python
-  from collections import defaultdict
-
-  groups = defaultdict(list)
-  print(groups["missing"])      # [] and key is inserted
-  print("missing" in groups)    # True
-
-  print(groups.get("other"))    # None and no insertion
-  print("other" in groups)      # False
-  ```
-
-- Why is `defaultdict(list)` safer than `defaultdict([])`?
-
-  Answer: `defaultdict` expects a callable factory. `list` is callable and creates a fresh list for each missing key. `[]` is a list object, not a callable.
-
-  ```python
-  from collections import defaultdict
-
-  by_venue = defaultdict(list)
-  by_venue["NASDAQ"].append("order-1")
-
-  # bad = defaultdict([])  # TypeError
-  ```
-
-- When can `defaultdict` cause a memory leak?
-
-  Answer: when accidental reads create endless keys in a long-running process, especially with unbounded request IDs, user IDs, symbols, or bad input. Use `.get()` or membership checks for non-mutating reads.
-
-  ```python
-  if account_id in balances:
-      return balances[account_id]
-  return None
-  ```
-
-### Quick revision
-
-- `defaultdict` reduces boilerplate for grouping/counting.
-- Missing-key access inserts a value.
-- Use `.get()` for non-mutating reads.
-- In long-running services, guard unbounded key growth.
+Keep in mind: accidental reads can grow state in a long-running process. Use `.get()` or `key in d` when you only want to check.
 
 ---
 
 ## `deque`
 
-### Concept
-
-`deque` is a double-ended queue with O(1) append/pop from both ends.
-
-Why backend systems care:
-
-- Sliding windows for rate limits, rolling metrics, recent ticks.
-- Lightweight producer/consumer queues inside one process.
-- Avoids O(n) `list.pop(0)`.
-
-### Runnable examples
-
-Queue behavior:
+`deque` is a double-ended queue. Appending or popping from either end is O(1), so it fits queues and rolling windows better than a list with `pop(0)`.
 
 ```python
 from collections import deque
@@ -149,11 +108,20 @@ q = deque()
 q.append("msg-1")
 q.append("msg-2")
 
-print(q.popleft())  # msg-1
-print(q.popleft())  # msg-2
+print(q.popleft())
+print(q.popleft())
 ```
 
-Sliding window:
+Output:
+
+```text
+msg-1
+msg-2
+```
+
+Why: `popleft()` removes from the front without shifting every remaining element.
+
+`deque(maxlen=N)` keeps only the latest `N` items:
 
 ```python
 from collections import deque
@@ -162,30 +130,19 @@ prices = deque(maxlen=3)
 
 for price in [100.0, 101.0, 99.5, 102.0]:
     prices.append(price)
-    print(list(prices), sum(prices) / len(prices))
-
-# maxlen automatically drops oldest items.
+    print(list(prices), round(sum(prices) / len(prices), 2))
 ```
 
-Rate-limit sketch:
+Output:
 
-```python
-from collections import deque
-import time
-
-events = deque()
-
-def allow(max_events: int, window_sec: float) -> bool:
-    now = time.monotonic()
-    while events and now - events[0] > window_sec:
-        events.popleft()
-    if len(events) >= max_events:
-        return False
-    events.append(now)
-    return True
+```text
+[100.0] 100.0
+[100.0, 101.0] 100.5
+[100.0, 101.0, 99.5] 100.17
+[101.0, 99.5, 102.0] 100.83
 ```
 
-### Performance
+Why: once the deque reaches `maxlen=3`, adding a new item automatically drops the oldest item.
 
 | Operation | `list` | `deque` |
 | --- | --- | --- |
@@ -194,27 +151,13 @@ def allow(max_events: int, window_sec: float) -> bool:
 | Pop left | O(n) | O(1) |
 | Random access | O(1) | O(n) |
 
-### Quick revision
-
-- Use `deque` for queues and sliding windows.
-- Avoid `list.pop(0)` in hot paths.
-- `deque(maxlen=N)` is useful for bounded recent history.
-- Do not use `deque` for heavy random indexing.
+Keep in mind: `deque` is great for ends, not for heavy random indexing.
 
 ---
 
 ## `Counter`
 
-### Concept
-
-`Counter` is a dict subclass for frequency counting.
-
-Why backend systems care:
-
-- Summarize logs, error codes, user agents, symbols, venue rejects.
-- Useful for top-k interview problems and incident analysis.
-
-### Runnable examples
+`Counter` counts how many times each value appears. It is a dict subclass, so keys are the values being counted and values are the counts.
 
 ```python
 from collections import Counter
@@ -222,11 +165,20 @@ from collections import Counter
 symbols = ["AAPL", "MSFT", "AAPL", "NVDA", "AAPL", "MSFT"]
 counts = Counter(symbols)
 
-print(counts["AAPL"])        # 3
-print(counts.most_common(2)) # [('AAPL', 3), ('MSFT', 2)]
+print(counts["AAPL"])
+print(counts.most_common(2))
 ```
 
-Log processing:
+Output:
+
+```text
+3
+[('AAPL', 3), ('MSFT', 2)]
+```
+
+Why: `Counter` scans the iterable and increments the count for each symbol. `.most_common(2)` returns the two highest counts.
+
+Log-style example:
 
 ```python
 from collections import Counter
@@ -242,54 +194,45 @@ status_counts = Counter(row["status"] for row in logs)
 print(status_counts.most_common())
 ```
 
-Edge cases:
+Output:
+
+```text
+[(500, 2), (200, 1), (429, 1)]
+```
+
+Why: the generator pulls only the `status` field from each log row, then `Counter` aggregates those statuses.
+
+Counts can be zero or negative:
 
 ```python
 from collections import Counter
 
-c = Counter({"ok": 3})
-c["ok"] -= 5
-print(c)  # Counter({'ok': -2})
+c = Counter({"AAPL": 2})
+c["AAPL"] -= 2
+c["MSFT"] -= 1
 
-print(+c)  # Counter() removes zero/negative counts
+print(c)
+print(+c)
 ```
 
-### Interview traps/questions
+Output:
 
-- How do you find top-k frequent values?
+```text
+Counter({'AAPL': 0, 'MSFT': -1})
+Counter()
+```
 
-  Answer: use `Counter(values).most_common(k)`.
+Why: `Counter` keeps zero and negative counts until you clean it. Unary `+c` returns a new counter with only positive counts.
 
-  ```python
-  from collections import Counter
+Keep in mind: `Counter` is usually clearer than manual dict counting. Use manual counting only when the update logic is custom.
 
-  errors = [500, 429, 500, 404, 500, 429]
-  print(Counter(errors).most_common(2))
-  # [(500, 3), (429, 2)]
-  ```
+---
 
-- What happens if a `Counter` count becomes zero or negative?
+## Quick revision
 
-  Answer: the key can remain in the `Counter` with zero or negative count. Unary plus removes zero and negative counts.
-
-  ```python
-  from collections import Counter
-
-  c = Counter({"AAPL": 2})
-  c["AAPL"] -= 2
-  c["MSFT"] -= 1
-
-  print(c)   # Counter({'AAPL': 0, 'MSFT': -1})
-  print(+c)  # Counter()
-  ```
-
-- Why is `Counter` usually better than manual dict counting in interview code?
-
-  Answer: it is shorter, clearer, less error-prone, and has built-in operations like `.most_common()`, addition, subtraction, and cleanup. Manual counting is fine only when custom behavior is needed.
-
-### Quick revision
-
-- `Counter(iterable)` counts values.
-- `.most_common(k)` solves top-k frequency tasks.
-- Counts can be zero or negative.
-- Use generators with `Counter` for memory-efficient log scanning.
+- Use `defaultdict(list)` for grouping and `defaultdict(int)` for simple counting.
+- `d[key]` inserts on a missing `defaultdict` key; `.get()` does not.
+- Use `deque` for queues and sliding windows.
+- Avoid `list.pop(0)` in hot paths.
+- Use `Counter(values).most_common(k)` for top-k frequency questions.
+- Clean zero or negative `Counter` values with unary `+` when needed.
