@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local secrets and environment
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+
+# OS/editor noise
+.DS_Store
+
+# Obsidian local workspace state
+.obsidian/workspace*.json
+
