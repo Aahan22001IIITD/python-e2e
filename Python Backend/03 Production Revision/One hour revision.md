@@ -29,22 +29,18 @@ Use this as the final pass before the interview.
 
 ---
 
-## Most common Python backend interview mistakes
+## Things to keep in mind
 
-| Mistake | Better answer |
-| --- | --- |
-| Saying variables store values | Names reference objects |
-| Saying tuples are always immutable | Tuple top-level is immutable; nested mutables can change |
-| Using `is` for strings/ints | Use `==` except for singletons/sentinels |
-| Ignoring mutable defaults | Use `None` and create fresh object |
-| Blindly using `deepcopy` | Discuss cost, ownership, and alternatives |
-| Catching `Exception` broadly | Catch specific errors and log context |
-| Retrying every failure | Retry only transient/idempotent operations |
-| Blocking in async handlers | Use async libraries or executors |
-| Assuming GIL prevents races | Use locks/queues/ownership |
-| Loading huge files/JSON into memory | Stream line-by-line or chunk |
-| Overusing inheritance | Prefer composition for service dependencies |
-| Overusing lambdas/comprehensions | Keep production code readable |
+- Names reference objects; assignment does not copy the object.
+- Tuple immutability is shallow, so nested lists/dicts can still change.
+- Use `==` for value comparison and `is` only for `None`, sentinels, or identity checks.
+- Use `None` as the default when a function needs a fresh list/dict per call.
+- Explain `deepcopy` with tradeoffs: isolation is useful, but cost and ownership matter.
+- Catch specific exceptions, log useful context, and preserve the original stack trace.
+- Retry only transient failures, and only when the operation is idempotent or reconcilable.
+- In async handlers, use async libraries or move blocking work outside the event loop.
+- The GIL does not make shared state safe; use locks, queues, or clear ownership.
+- Stream large files instead of loading the whole payload into memory.
 
 ---
 
@@ -117,6 +113,12 @@ top = Counter(["AAPL", "MSFT", "AAPL"]).most_common(1)
 print(top)
 ```
 
+Output:
+
+```text
+[('AAPL', 2)]
+```
+
 ---
 
 ## Last-minute explanation templates
@@ -137,4 +139,16 @@ GIL:
 
 ```text
 The GIL allows one thread to execute Python bytecode at a time in CPython. Threads can still help IO-bound workloads, but CPU-bound Python usually needs multiprocessing, native code, or offloading.
+```
+
+Retry:
+
+```text
+A timeout means the client did not receive a response; it does not prove the operation failed. For order submission, use a stable client order ID, reconcile status, and return an unknown state instead of blindly sending a duplicate.
+```
+
+Shallow copy:
+
+```text
+A shallow copy creates a new outer container but keeps references to nested objects. If the nested data will be mutated, build a fresh nested structure or use deep copy when the object graph is dynamic and the cost is acceptable.
 ```

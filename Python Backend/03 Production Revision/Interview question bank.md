@@ -156,9 +156,19 @@ Answer: parse JSON with `json.loads`, catch `json.JSONDecodeError`, then validat
 def add_seen(symbol, seen=[]):
     seen.append(symbol)
     return seen
+
+print(add_seen("AAPL"))
+print(add_seen("MSFT"))
 ```
 
 Answer: the default list is shared across calls. Replace it with a `None` sentinel and create a fresh list per call.
+
+Output from the buggy version:
+
+```text
+['AAPL']
+['AAPL', 'MSFT']
+```
 
 ```python
 def add_seen(symbol: str, seen: list[str] | None = None) -> list[str]:
@@ -188,7 +198,7 @@ print(base)   # {'risk': {'checks': []}}
 print(order)  # {'risk': {'checks': ['max_qty']}}
 ```
 
-Use `copy.deepcopy` only when the object graph is dynamic and the allocation cost is acceptable.
+Why: the fixed version creates a fresh nested `checks` list, so `order` can change without mutating `base`. Use `copy.deepcopy` only when the object graph is dynamic and the allocation cost is acceptable.
 
 ### 3. Dict key mutation
 
@@ -209,6 +219,12 @@ print(d.get(k))
 
 Answer: the key's hash/equality changed after insertion, so the dict may not find it in the bucket where it was stored. Use immutable keys.
 
+Output:
+
+```text
+None
+```
+
 ```python
 from dataclasses import dataclass
 
@@ -221,6 +237,8 @@ d = {k: "route"}
 
 print(d.get(Key("AAPL")))  # route
 ```
+
+Why: the frozen dataclass cannot be mutated after insertion, so its hash and equality behavior stay stable.
 
 ### 4. Async blocking bug
 
@@ -251,6 +269,8 @@ def blocking_call() -> dict:
 async def handler():
     return await asyncio.to_thread(blocking_call)
 ```
+
+Why: async code only helps when blocking waits yield control or are moved out of the event loop.
 
 ### 5. Retry semantics
 
@@ -290,6 +310,8 @@ def submit_order_with_reconcile(
 
     raise RuntimeError("order status unknown after retries") from last_error
 ```
+
+Why: a timeout leaves the order state unknown. The code uses the client order ID to check whether the exchange already knows the order before trying again.
 
 ---
 

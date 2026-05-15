@@ -23,7 +23,13 @@ add_check(alias)
 print(base)  # {'checks': ['max_qty']}
 ```
 
-Safe pattern: copy at boundaries or use immutable snapshots.
+Output:
+
+```text
+{'checks': ['max_qty']}
+```
+
+Why it matters: `alias` and `base` refer to the same dict, so changing one changes the other. In backend code, copy at boundaries or use immutable snapshots when shared state should not be mutated.
 
 ---
 
@@ -40,6 +46,13 @@ print(bad("AAPL"))  # ['AAPL']
 print(bad("MSFT"))  # ['AAPL', 'MSFT']
 ```
 
+Output:
+
+```text
+['AAPL']
+['AAPL', 'MSFT']
+```
+
 Fix:
 
 ```python
@@ -50,7 +63,7 @@ def good(symbol: str, seen: list[str] | None = None) -> list[str]:
     return seen
 ```
 
-Production bug: cross-request state leakage in long-running workers.
+Why it matters: the default list is shared across calls, which can leak state between requests in long-running workers. Keep in mind: use `None` as a sentinel when the default should be a fresh list/dict.
 
 ---
 
@@ -71,7 +84,14 @@ deep["risk"]["checks"].append("price_band")
 print(base)  # unchanged by deep copy
 ```
 
-Interview trap: `.copy()` on a dict is not enough for nested dict/list structures.
+Output:
+
+```text
+{'risk': {'checks': ['max_qty']}}
+{'risk': {'checks': ['max_qty']}}
+```
+
+Why it matters: `base.copy()` isolates only the outer dict; the nested `risk` dict and `checks` list are still shared. Keep in mind: use explicit fresh construction for small shapes, and reserve `deepcopy` for dynamic object graphs where the cost is acceptable.
 
 ---
 
@@ -94,7 +114,7 @@ def build_order_fast(symbol: str) -> dict:
     }
 ```
 
-HFT point: blind deep copies can create allocation spikes and tail-latency outliers.
+Why it matters: blind deep copies can create allocation spikes and tail-latency outliers. Keep in mind: copy only the fields that need isolation.
 
 ---
 
@@ -110,6 +130,13 @@ print(a == b)  # True
 print(a is b)  # False
 ```
 
+Output:
+
+```text
+True
+False
+```
+
 Use `is None` because `None` is a singleton and `== None` can call custom equality logic.
 
 ```python
@@ -119,7 +146,7 @@ if timeout is None:
 
 ---
 
-## 6. Interning and identity traps
+## 6. Interning and identity
 
 CPython may intern/cache small integers and some strings, so `a is b` can appear true for equal values. This is an implementation optimization, not a correctness rule.
 
@@ -131,7 +158,13 @@ print(x == y)  # True
 # x is y may be True in CPython; do not rely on it.
 ```
 
-Production rule: use `==` for values, `is` for singletons/sentinels.
+Output:
+
+```text
+True
+```
+
+Production rule: use `==` for values, `is` for singletons/sentinels. Keep in mind: small integer/string identity is an implementation detail, not a rule to code against.
 
 ---
 
@@ -163,7 +196,13 @@ t[0].append("MSFT")
 print(t)  # (['AAPL', 'MSFT'], 'strategy-a')
 ```
 
-Bug: treating such tuples as safe immutable records can lead to hidden shared-state mutation.
+Output:
+
+```text
+(['AAPL', 'MSFT'], 'strategy-a')
+```
+
+Why it matters: treating such tuples as fully immutable records can hide shared-state mutation. Keep in mind: tuple immutability is shallow.
 
 ---
 
@@ -209,7 +248,13 @@ k.symbol = "MSFT"
 print(d.get(k))  # often None
 ```
 
-Safe pattern: use immutable keys like strings, ints, or tuples of immutable values.
+Output:
+
+```text
+None
+```
+
+Why it matters: after mutation, the dict may search in the wrong hash bucket. Keep in mind: use immutable keys like strings, ints, tuples of immutable values, or frozen dataclasses.
 
 ---
 
@@ -226,7 +271,16 @@ qty_by_symbol = {o["symbol"]: o["qty"] for o in orders}
 total = sum(o["qty"] for o in orders)  # generator expression
 ```
 
-Use generators for large files/logs or streaming pipelines.
+Output values:
+
+```text
+symbols = ['AAPL', 'MSFT']
+active = {'AAPL'}
+qty_by_symbol = {'AAPL': 10, 'MSFT': 0}
+total = 10
+```
+
+Why it matters: comprehensions are good when you need a collection; generators are better for large files/logs or streaming pipelines because they avoid building an intermediate list.
 
 ---
 
@@ -243,7 +297,13 @@ def normalize(symbol: str) -> str:
 clean = list(map(normalize, [" aapl ", " msft "]))
 ```
 
-Avoid complex lambdas in production code because they hurt readability and stack traces.
+Output:
+
+```text
+['AAPL', 'MSFT']
+```
+
+Why it matters: named functions make stack traces and debugging clearer. Keep in mind: avoid complex lambdas in production code when a small named function is easier to read.
 
 ---
 
@@ -258,7 +318,14 @@ print(next(it))  # 2
 # next(it)       # StopIteration
 ```
 
-Production relevance: file handles, DB cursors, paginated APIs, and streaming responses are iterator-like. Remember iterators are one-pass.
+Output:
+
+```text
+1
+2
+```
+
+Why it matters: file handles, DB cursors, paginated APIs, and streaming responses are iterator-like. Keep in mind: iterators are one-pass.
 
 ---
 
@@ -274,6 +341,12 @@ def valid_lines(lines: list[str]):
             yield line
 
 print(list(valid_lines(["AAPL", "", "MSFT"])))
+```
+
+Output:
+
+```text
+['AAPL', 'MSFT']
 ```
 
 Why it matters: generators stream large data without loading all rows/events/logs into memory.
@@ -321,7 +394,15 @@ with Resource():
     print("use")
 ```
 
-`__exit__` runs even on exceptions. Returning `True` suppresses the exception; usually avoid this unless intentional.
+Output:
+
+```text
+open
+use
+close
+```
+
+Why it matters: `__exit__` runs even on exceptions. Keep in mind: returning `True` suppresses the exception, so usually return `False`/`None` unless suppression is intentional.
 
 ---
 
@@ -345,7 +426,7 @@ def get_quote(symbol: str):
         raise ExchangeUnavailable(symbol) from exc
 ```
 
-Avoid `except Exception: pass`; it hides failures and destroys debugging context.
+Why it matters: `raise ... from exc` keeps the original timeout attached to the domain error. Keep in mind: avoid `except Exception: pass`; it hides failures and destroys debugging context.
 
 ---
 
@@ -367,7 +448,7 @@ def retry_timeout(fn, attempts: int = 3):
     raise RuntimeError("operation timed out") from last_error
 ```
 
-Trading answer: use client order IDs/idempotency keys, reconcile order state, and do not blindly resubmit.
+Why it matters: retrying a timeout is not the same as retrying a known failed operation. For trading systems, use client order IDs/idempotency keys, reconcile order state, and do not blindly resubmit.
 
 ---
 
@@ -382,7 +463,13 @@ def log_event(event: str, *tags: str, **fields) -> None:
 log_event("order.accepted", "trading", venue="NASDAQ", symbol="AAPL")
 ```
 
-Public backend APIs should prefer explicit typed parameters when possible.
+Output:
+
+```text
+order.accepted ('trading',) {'venue': 'NASDAQ', 'symbol': 'AAPL'}
+```
+
+Why it matters: flexible call signatures are useful for wrappers and logging adapters. Keep in mind: public backend APIs should prefer explicit typed parameters when possible.
 
 ---
 
@@ -426,7 +513,7 @@ class OrderService:
         self.connector = connector
 ```
 
-Backend answer: use polymorphism for connector interfaces, but prefer composition for services so dependencies can be tested/replaced.
+Why it matters: connector interfaces are a good use of polymorphism, while services are easier to test when dependencies are passed in. Keep in mind: prefer composition for business services unless inheritance clearly models an `is-a` relationship.
 
 ---
 
@@ -445,7 +532,14 @@ for t in threads: t.start()
 for t in threads: t.join()
 ```
 
-Tradeoff: multiprocessing adds serialization, startup cost, and memory overhead.
+Typical output order:
+
+```text
+fetch AAPL
+fetch MSFT
+```
+
+Why it matters: threads can improve IO concurrency, but multiprocessing is usually better for CPU-bound Python. Keep in mind: multiprocessing adds serialization, startup cost, and memory overhead.
 
 ---
 
@@ -453,7 +547,7 @@ Tradeoff: multiprocessing adds serialization, startup cost, and memory overhead.
 
 The Global Interpreter Lock allows only one thread to execute Python bytecode at a time in CPython.
 
-Correct answer:
+Interview answer:
 
 - It limits CPU-bound parallelism in pure Python threads.
 - It does not prevent logical race conditions.
@@ -483,7 +577,13 @@ async def main():
 asyncio.run(main())
 ```
 
-FastAPI benefits when handlers call async DB/HTTP clients. Blocking calls like `time.sleep()` or sync DB drivers can stall the event loop.
+Output:
+
+```text
+['AAPL=100', 'MSFT=100']
+```
+
+Why it matters: FastAPI benefits when handlers call async DB/HTTP clients. Keep in mind: blocking calls like `time.sleep()` or sync DB drivers can stall the event loop.
 
 ---
 

@@ -26,7 +26,21 @@ def add_error(code: int, errors: list[int] | None = None) -> list[int]:
     return errors
 ```
 
-Revision point: defaults are evaluated once.
+Expected behavior:
+
+```python
+print(add_error(400))
+print(add_error(500))
+```
+
+Output:
+
+```text
+[400]
+[500]
+```
+
+Why: using `None` creates a fresh list for each call that does not pass `errors`. Keep in mind: mutable defaults are evaluated once at function definition time.
 
 ---
 
@@ -54,7 +68,13 @@ for order in orders:
 print(dict(by_venue))
 ```
 
-Revision point: `defaultdict(list)` is clean for grouping.
+Output:
+
+```text
+{'NASDAQ': [{'id': '1', 'venue': 'NASDAQ'}, {'id': '3', 'venue': 'NASDAQ'}], 'NYSE': [{'id': '2', 'venue': 'NYSE'}]}
+```
+
+Why: `defaultdict(list)` creates the list the first time a venue is seen, so the loop can append directly.
 
 ---
 
@@ -82,7 +102,16 @@ for price in [100.0, 101.0, 99.0, 102.0]:
     print(ma.add(price))
 ```
 
-Revision point: `deque(maxlen=N)` drops oldest automatically, but update totals before/after carefully.
+Output:
+
+```text
+100.0
+100.5
+100.0
+100.66666666666667
+```
+
+Why: `deque(maxlen=N)` drops the oldest value automatically. Keep in mind: subtract the old value before appending the new one, otherwise the running total becomes wrong.
 
 ---
 
@@ -97,7 +126,13 @@ symbols = ["AAPL", "MSFT", "AAPL", "NVDA", "AAPL", "MSFT"]
 print(Counter(symbols).most_common(2))
 ```
 
-Revision point: `Counter.most_common(k)` is the interview shortcut.
+Output:
+
+```text
+[('AAPL', 3), ('MSFT', 2)]
+```
+
+Why: `Counter` counts occurrences and `most_common(k)` returns the highest-frequency items without writing sorting/counting code manually.
 
 ---
 
@@ -123,7 +158,13 @@ def parse_order(raw: str) -> dict:
 print(parse_order('{"symbol": "AAPL", "qty": 100}'))
 ```
 
-Revision point: parse errors and validation errors are different.
+Output:
+
+```text
+{'symbol': 'AAPL', 'qty': 100}
+```
+
+Why: parsing only proves the string is valid JSON; validation proves the payload has the fields and types your service expects.
 
 ---
 
@@ -152,7 +193,14 @@ def normalize(symbol: str) -> str:
 print(normalize(" aapl "))
 ```
 
-Revision point: always use `functools.wraps`.
+Output shape:
+
+```text
+normalize took <elapsed>ms
+AAPL
+```
+
+Why: the decorator logs elapsed time without changing the function result. Keep in mind: `functools.wraps` preserves metadata used by debuggers, docs, and web frameworks.
 
 ---
 
@@ -174,7 +222,7 @@ def retry_timeout(fn, attempts: int = 3):
     raise RuntimeError("timed out after retries") from last_error
 ```
 
-Revision point: real production retries need idempotency, jitter, deadlines, and metrics.
+Why: only `TimeoutError` is retried, and the final exception keeps the original timeout as the root cause. Keep in mind: real production retries also need idempotency, jitter, deadlines, and metrics.
 
 ---
 
@@ -196,7 +244,13 @@ async def main():
 asyncio.run(main())
 ```
 
-Revision point: async helps IO concurrency; always think about timeouts/backpressure.
+Output:
+
+```text
+['AAPL=100.0', 'MSFT=100.0']
+```
+
+Why: both quote requests wait concurrently instead of one after another. Keep in mind: async helps IO concurrency; still add timeouts and backpressure.
 
 ---
 
@@ -217,7 +271,7 @@ Answer:
 []
 ```
 
-Revision point: iterators are consumed.
+Why: `list(it)` consumes the iterator the first time, so the second conversion has no remaining values. Keep in mind: file handles, DB cursors, and streaming responses often behave the same way.
 
 ---
 
@@ -247,4 +301,14 @@ def build_order_fast(symbol: str) -> dict:
     }
 ```
 
-Revision point: deep copy is safe but not always the best production design.
+Expected output shape:
+
+```python
+print(build_order_fast("AAPL"))
+```
+
+```text
+{'symbol': 'AAPL', 'risk': {'checks': ['max_qty', 'symbol_allowed']}}
+```
+
+Why: explicit construction avoids nested shared state and avoids the allocation cost of copying a larger object graph. Keep in mind: deep copy is safe for isolation, but not always the best production design.
