@@ -308,7 +308,7 @@ Out of memory: Killed process 1234 (python) total-vm:4096000kB
 
 Production interpretation: process may need memory limits, leak investigation, queue bounds, or host capacity review.
 
-## Interview Questions and Traps
+## Interview Questions
 
 - "How do you securely access production servers?"
   - Answer: Use bastions/VPN, MFA, least privilege, named accounts, audited access, and read-only investigation before privileged changes.
@@ -325,7 +325,7 @@ Production interpretation: process may need memory limits, leak investigation, q
 - "How do you avoid leaking secrets in logs?"
   - Answer: Redact tokens/keys, avoid env dumps or signed payloads, use structured allowlisted fields, and review exception messages.
 
-Trap: saying "I would just SSH and restart it." Better: collect evidence, check impact, verify failover, then act.
+Warning: avoid jumping straight to SSH and restart. Collect evidence, check impact, verify failover, then act.
 
 ## Performance and Reliability Considerations
 

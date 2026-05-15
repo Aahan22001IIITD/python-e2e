@@ -6,4 +6,3 @@ people = [
 def func(person):
     return person["age"]
 people.sort(key = func)
-print(people)

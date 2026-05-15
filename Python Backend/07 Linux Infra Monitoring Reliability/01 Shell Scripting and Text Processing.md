@@ -195,12 +195,11 @@ grep -E "latency_ms=[1-9][0-9]{3,}" app.log
 grep -E "\b(retry|timeout)\b" app.log
 ```
 
-### Interview Traps
+### Warnings
 
 - `grep error` is case-sensitive; use `grep -i error` when logs vary.
 - `grep "500"` can match timestamps or order IDs; prefer structured fields like `status=500`.
-- Recursive `grep -R /` can be dangerous and slow on production hosts.
-- `grep` on compressed logs needs `zgrep`.
+- Keep recursive searches narrow on production hosts, and use `zgrep` for compressed logs.
 
 ```bash
 zgrep "order_id=ORD-9912" /var/log/order-router/app.log.1.gz

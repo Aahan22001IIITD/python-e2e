@@ -60,7 +60,7 @@ Useful signals:
 - `load average`: runnable or blocked work.
 - `wa`: IO wait, useful when disk/network storage is slow.
 
-Interview trap: high load does not always mean CPU saturation. Load can rise from IO waits too.
+Warning: high load does not always mean CPU saturation. Load can rise from IO waits too.
 
 ### Identifying Stuck Processes
 
@@ -314,7 +314,7 @@ sudo systemctl status old-order-router
 
 Fix carefully. Do not kill unknown processes without identifying owner and impact.
 
-## Interview Questions and Traps
+## Interview Questions
 
 - "What is the difference between `ps`, `top`, and `systemctl`?"
   - Answer: `ps` shows process snapshots, `top` shows live resource usage, and `systemctl` manages service lifecycle/state.

@@ -32,6 +32,8 @@ NEW -> VALIDATED -> SENT -> ACKED -> PARTIALLY_FILLED -> FILLED
                          \-> CANCEL_REQUESTED -> CANCELLED
 ```
 
+This output is the order's allowed journey. It shows why the backend should not jump directly from `SENT` to `FILLED` or treat a cancel request as final until the exchange confirms it.
+
 ### Backend Example
 
 ```python
@@ -51,12 +53,11 @@ async def send_order(order: Order) -> None:
     )
 ```
 
-### Interview Traps
+Why this code is written this way: the backend records that the order was sent before waiting for the exchange. If the call times out, the code marks the order as `UNKNOWN` and queues reconciliation instead of pretending the order failed.
 
-- Treating timeout as rejection.
-- Not persisting client order ID.
-- No reconnect/replay/resync plan.
-- Assuming messages arrive exactly once and in order.
+### Keep In Mind
+
+Timeout means "not confirmed", not "rejected". Keep `client_order_id`, reconnect/replay state, and message ordering visible in your design.
 
 ### Performance Considerations
 
@@ -125,11 +126,19 @@ class PriceWindow:
 started = time.monotonic()
 ```
 
-### Interview Traps
+Example behavior:
 
-- Optimizing mean latency while p99 is bad.
-- Ignoring GC, serialization, logging, and allocations.
-- Claiming Python is always too slow instead of isolating hot paths.
+```text
+window size = 3
+prices added = 100, 101, 102, 110
+latest average = (101 + 102 + 110) / 3 = 104.33
+```
+
+The code keeps a rolling average without summing the whole window every time. `time.monotonic()` is used for intervals because it is not affected by wall-clock changes.
+
+### Keep In Mind
+
+Always discuss p99/tail latency, not only average latency. Python can work well for APIs, orchestration, and event processing when the true hot path is measured and isolated.
 
 ### Performance Considerations
 
@@ -189,12 +198,11 @@ connection pool wait, DNS failures, and whether the instance is on a bad host.
 Remove from rotation if impact continues.
 ```
 
-### Interview Traps
+This output is a debugging path, not a random checklist. It moves from traffic distribution to host resources, dependency waits, and finally mitigation if users are affected.
 
-- Only knowing cloud dashboards and not host-level checks.
-- Confusing liveness with readiness.
-- Ignoring file descriptor limits and ephemeral port exhaustion.
-- No graceful shutdown behavior.
+### Keep In Mind
+
+Cloud dashboards are not enough during incidents. Know readiness vs liveness, file descriptor limits, port exhaustion, and graceful shutdown.
 
 ### Performance Considerations
 
@@ -249,12 +257,11 @@ Manual infrastructure changes are hard to audit and easy to misapply. Trading/ba
 6. Record incident/deploy notes if behavior changed.
 ```
 
-### Interview Traps
+This checklist is ordered to reduce production risk: prove the artifact, limit exposure, observe real traffic, then either continue or rollback based on evidence.
 
-- No rollback story.
-- Running DB migrations blindly during deploy.
-- Secrets stored in repo or logs.
-- Manual one-off production fixes.
+### Keep In Mind
+
+Every deployment answer should mention rollback/canary, reviewed config, safe secrets handling, and migration risk.
 
 ### Performance Considerations
 

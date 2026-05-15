@@ -56,6 +56,8 @@ limit order:
   submit -> ack -> maybe rest on book -> partial fills/cancel/modify -> terminal state later
 ```
 
+This output shows the main backend difference: a market order usually becomes final quickly, while a limit order may stay live and keep producing events over time.
+
 ---
 
 ## Liquidity And Exchange Behavior
@@ -93,6 +95,8 @@ Limit buy 100 @ 185.30:
 20 remains unfilled or rests depending on venue rules
 ```
 
+The output shows slippage and price control. The market order completes by walking up the book to `185.40`; the limit order refuses that worse price, so only `80` shares can fill at `185.30` or better.
+
 ---
 
 ## Practical Backend Example
@@ -123,6 +127,16 @@ def validate_order(order: OrderRequest) -> None:
     if order.order_type not in {"MARKET", "LIMIT"}:
         raise ValueError("unsupported order type")
 ```
+
+Example output/behavior:
+
+```text
+MARKET with limit_price -> ValueError("market order must not include limit_price")
+LIMIT without limit_price -> ValueError("limit order requires limit_price")
+LIMIT with price and positive quantity -> accepted by this validator
+```
+
+This validator protects the API contract before the order reaches risk checks or the exchange connector.
 
 Production systems also validate:
 
@@ -178,6 +192,8 @@ Backend lacks idempotency.
 Exchange receives two market orders.
 Position doubles before monitoring detects it.
 ```
+
+This output shows why idempotency is not optional for market orders. A retry after timeout can become a second real trade if the backend does not reuse the original `client_order_id`.
 
 Fix:
 

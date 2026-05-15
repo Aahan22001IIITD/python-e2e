@@ -57,6 +57,8 @@ exchange connector
   -> audit/history writer
 ```
 
+This output shows one event feeding multiple consumers. That is the main benefit of event-driven design: order state, risk, client updates, and audit history can each be handled by the service that owns that responsibility.
+
 ---
 
 ## Event-Driven Systems
@@ -115,6 +117,16 @@ async def consume_events(queue: asyncio.Queue) -> None:
         finally:
             queue.task_done()
 ```
+
+Example behavior:
+
+```text
+queue receives OrderFilled
+consumer calls apply_event(OrderFilled)
+queue marks the item done after processing
+```
+
+The `finally` block matters because the queue should not think work is still running forever if `apply_event()` raises. Production code would also add error handling, retries, and a dead-letter path.
 
 Backend tradeoff:
 
@@ -279,6 +291,8 @@ API request
   -> websocket delivery
 ```
 
+This output is what a trace should make visible. If users see stale data, the trace helps locate whether the delay came from validation, queueing, exchange ack, consumer lag, or websocket delivery.
+
 ---
 
 ## Production Debugging Examples
@@ -317,7 +331,7 @@ Investigate:
 
 ---
 
-## Common Interview Questions And Traps
+## Common Interview Questions
 
 - What is event-driven architecture and why is it useful for trading systems?
   - Answer: It moves state changes as events between producers and consumers; it fits trading because order, fill, market data, and risk updates are time-sensitive streams.
@@ -332,14 +346,9 @@ Investigate:
 - How do you protect the system from slow consumers?
   - Answer: Use bounded queues, per-consumer isolation, backpressure, slow-consumer disconnects, and replay instead of infinite buffering.
 
-Traps:
+Keep in mind:
 
-- Saying "just use Kafka" without explaining ordering and consumer lag.
-- Ignoring idempotency.
-- Using unbounded queues.
-- Scaling workers without preserving per-order ordering.
-- Treating async as a fix for CPU-bound work.
-- Monitoring infrastructure but not business freshness.
+Naming a queue or broker is not enough. Explain ordering, idempotency, bounded queues, consumer lag, and business freshness such as stale market data or stuck orders.
 
 ---
 

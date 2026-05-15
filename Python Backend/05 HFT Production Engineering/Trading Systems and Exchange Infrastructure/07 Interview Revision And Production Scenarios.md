@@ -322,6 +322,8 @@ I would persist the intent, track the outbound message, expose UNKNOWN,
 then reconcile with exchange open orders/executions before retrying.
 ```
 
+This is a strong answer because it gives the user-visible output (`UNKNOWN`) and the backend justification: durable intent, outbound evidence, and exchange reconciliation are safer than guessing.
+
 ---
 
 ## Low-Latency Backend Engineering Tips
@@ -341,7 +343,7 @@ then reconcile with exchange open orders/executions before retrying.
 - Keep database writes off the market data hot path when possible.
 - Monitor event loop lag, GC pauses, queue depth, and stale data age.
 
-Interview trap: never claim Python is impossible for trading systems. A good answer is that Python is often used for orchestration, APIs, automation, tools, and some event processing, while extremely latency-critical paths may use C++/Java/Rust or exchange-native systems.
+Keep in mind: do not claim Python is impossible for trading systems. Python is often used for orchestration, APIs, automation, tools, and some event processing, while extremely latency-critical paths may use C++/Java/Rust or exchange-native systems.
 
 ---
 

@@ -72,6 +72,8 @@ POST /orders
   -> websocket publishes order update
 ```
 
+This output shows why order handling is not a single API call. The API accepts intent, the connector talks to the exchange, and later exchange events become the source of truth for user-visible status.
+
 ---
 
 ## Practical Workflow Example
@@ -88,6 +90,8 @@ Client submits a limit buy:
   "limit_price": 185.25
 }
 ```
+
+This request is valid because a limit order includes both quantity and a limit price. The `client_order_id` is important because retries can be matched to the same original intent instead of creating another order.
 
 Backend flow:
 
@@ -118,6 +122,15 @@ def transition(current: str, next_state: str) -> str:
     return next_state
 ```
 
+Example output/behavior:
+
+```text
+transition("PENDING_SUBMIT", "ACKED") -> "ACKED"
+transition("NEW", "FILLED") -> ValueError
+```
+
+The guard prevents impossible shortcuts in the order lifecycle. That matters because fills, rejects, cancels, and unknown states can arrive from different services at different times.
+
 ---
 
 ## Acknowledgements, Executions, Cancels, And Modifications
@@ -140,6 +153,8 @@ t3: exchange sends cancel reject: already filled
 ```
 
 Correct backend behavior: accept the fill as authoritative and mark the order `FILLED`, not `CANCELLED`.
+
+The output shows the race clearly: the API can accept a cancel command, but the exchange may execute the order before processing that cancel.
 
 ---
 
@@ -193,7 +208,7 @@ Explanation: API accepted the cancel command; it did not guarantee exchange canc
 
 ---
 
-## Common Interview Questions And Traps
+## Common Interview Questions
 
 - What happens if `POST /orders` times out after the backend sent the order?
   - Answer: Treat the order as `UNKNOWN`; check durable outbound logs and reconcile with the exchange before retrying.
@@ -212,13 +227,9 @@ Explanation: API accepted the cancel command; it did not guarantee exchange canc
 - Why is `UNKNOWN` a valid production state?
   - Answer: Timeout, crash, or network loss can leave success or failure unconfirmed.
 
-Traps:
+Keep in mind:
 
-- Saying "timeout means order failed".
-- Updating order state without validating transitions.
-- Assuming cancel is guaranteed.
-- Ignoring partial fills.
-- Not storing raw exchange messages for audit/debugging.
+Do not equate timeout with failure, or cancel request with cancellation. Always preserve state transitions, partial fills, and raw exchange evidence for audit/debugging.
 
 ---
 

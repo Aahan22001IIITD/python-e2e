@@ -369,7 +369,7 @@ Rolling pattern:
 
 This updates one host at a time.
 
-## Interview Questions and Traps
+## Interview Questions
 
 - "Why use containers for backend services?"
   - Answer: Containers package runtime dependencies and make deployments more repeatable, but still need correct networking, secrets, resource limits, and monitoring.
@@ -386,7 +386,7 @@ This updates one host at a time.
 - "Why should Ansible tasks be idempotent?"
   - Answer: Idempotent tasks are safe to rerun; they change the host only when desired state differs from actual state.
 
-Trap: saying Docker "solves environment problems" without mentioning networking, secrets, host limits, and observability.
+Warning: Docker improves packaging consistency, but production still needs correct networking, secrets, host limits, and observability.
 
 ## Quick Revision
 

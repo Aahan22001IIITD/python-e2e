@@ -65,6 +65,8 @@ order manager
   -> order event stream
 ```
 
+This output shows the connector as a translation and recovery boundary. Internal services should not need to know every venue-specific protocol detail; they should receive normalized order events.
+
 ---
 
 ## FIX Protocol High-Level Overview
@@ -76,6 +78,8 @@ Example shape:
 ```text
 8=FIX.4.4|35=D|49=BUY_SIDE|56=EXCHANGE|11=cli-1|55=AAPL|54=1|38=100|40=2|44=185.25|
 ```
+
+This is a simplified FIX-style order message. The important interview point is not memorizing every tag; it is knowing that order routing is session-based, sequenced, and driven by execution reports.
 
 Important message types:
 
@@ -132,6 +136,8 @@ connection drops
   -> mark healthy only after state is consistent
 ```
 
+This output is ordered deliberately. The system becomes healthy only after reconnect, auth, subscription, and data consistency checks are complete.
+
 ---
 
 ## Authentication
@@ -184,6 +190,15 @@ class HeartbeatMonitor:
         return time.monotonic() - self.last_seen > self.timeout_seconds
 ```
 
+Example output/behavior:
+
+```text
+last heartbeat seen 2 seconds ago, timeout = 5 seconds -> healthy
+last heartbeat seen 8 seconds ago, timeout = 5 seconds -> stale
+```
+
+The monitor uses elapsed time to decide when the session is stale. A stale session should trigger recovery; it should not by itself cause blind order retries.
+
 Production behavior:
 
 - missed heartbeat should not immediately create duplicate orders
@@ -214,6 +229,8 @@ after restart, backend cannot assume rejection
 must query open orders / executions and reconcile
 ```
 
+This output explains the `UNKNOWN` state. The order may be live at the exchange even though the connector process lost local certainty.
+
 ---
 
 ## Production Examples
@@ -226,6 +243,8 @@ logs: "too many requests"
 fix: throttle connector, prioritize cancels, expose rate-limit metrics
 ```
 
+The fix protects both correctness and latency: throttling prevents more rejects, while cancel priority keeps risk-reducing actions from being stuck behind normal traffic.
+
 Sequence gap:
 
 ```text
@@ -233,6 +252,8 @@ symptom: market data book becomes inconsistent
 logs: expected sequence 1051, got 1057
 fix: mark book stale, fetch snapshot, replay deltas from snapshot sequence
 ```
+
+The output shows why sequence gaps are serious. Once a message is missing, the book can no longer be trusted until it is rebuilt or replayed from a known point.
 
 Token expiry:
 
@@ -242,9 +263,11 @@ logs: auth expired / unauthorized subscription
 fix: refresh token before expiry and resubscribe
 ```
 
+The fix is proactive because private streams can fail silently. Refreshing and resubscribing before expiry avoids stale order/account updates.
+
 ---
 
-## Common Interview Questions And Traps
+## Common Interview Questions
 
 - How do you reconnect a websocket feed safely?
   - Answer: Use jittered backoff, refresh auth, resubscribe, validate sequence numbers, snapshot/replay, and mark state stale until caught up.
@@ -261,14 +284,9 @@ fix: refresh token before expiry and resubscribe
 - How would you monitor exchange connectivity?
   - Answer: Monitor logon state, heartbeat age, reconnect count, sequence gaps, rejects, throttle events, stale data age, and order round-trip latency.
 
-Traps:
+Keep in mind:
 
-- Reconnecting without resubscribing.
-- Marking connection healthy before state resync.
-- Ignoring sequence gaps.
-- Treating heartbeat success as order-path success.
-- Logging API secrets or signed payloads.
-- Retrying order submissions without idempotency.
+Reconnect is incomplete without resubscribe and resync. Also keep secrets out of logs, treat sequence gaps seriously, and never retry order submissions without idempotency.
 
 ---
 

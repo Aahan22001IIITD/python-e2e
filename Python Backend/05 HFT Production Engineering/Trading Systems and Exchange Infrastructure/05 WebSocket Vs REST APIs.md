@@ -74,6 +74,8 @@ Websocket event path:
   exchange connector -> event bus -> websocket gateway -> client
 ```
 
+This output separates commands from events. REST is used when the client asks the system to do something; websocket is used when the system tells the client what changed.
+
 The REST response should usually say "accepted for processing" or return current known state. It should not pretend that downstream execution has completed unless it actually has.
 
 Example REST order response:
@@ -86,6 +88,8 @@ Example REST order response:
 }
 ```
 
+This output means the backend accepted and recorded the command, but the exchange has not necessarily acknowledged or filled the order yet.
+
 Example websocket update:
 
 ```json
@@ -97,6 +101,8 @@ Example websocket update:
   "exchange_order_id": "ex-999"
 }
 ```
+
+This output is a later fact from the event stream. The `sequence` lets the client detect missed or out-of-order updates.
 
 ---
 
@@ -121,6 +127,15 @@ async def subscribe_order_updates(uri: str, token: str) -> None:
                 continue
             handle_order_update(message)
 ```
+
+Example behavior:
+
+```text
+connect -> authenticate -> subscribe -> receive heartbeat -> send pong
+receive order_update -> call handle_order_update(message)
+```
+
+This code shows the happy path only. The production value comes from the extra recovery behavior below: reconnect, sequence checks, token refresh, and backpressure.
 
 Production version also needs:
 
@@ -189,6 +204,8 @@ event bus topic: order-events
   -> websocket gateway instance B -> clients N+1..M
 ```
 
+This output shows why websocket services need shared event fanout. A client may connect to any gateway instance, but every gateway still needs access to the same order events.
+
 Each gateway should track last sent sequence per client if clients need loss detection.
 
 ---
@@ -250,7 +267,7 @@ Fixes:
 
 ---
 
-## Common Interview Questions And Traps
+## Common Interview Questions
 
 - When would you use REST vs websocket in a trading backend?
   - Answer: Use REST for commands, snapshots, and explicit reads; use websocket for continuous order, market data, and status streams.
@@ -265,14 +282,9 @@ Fixes:
 - How do you deploy a websocket service safely?
   - Answer: Use connection draining, message-schema compatibility, canaries, reconnect jitter, and monitoring for reconnect storms and lag.
 
-Traps:
+Keep in mind:
 
-- Saying websocket is always faster without discussing reliability.
-- Forgetting reconnection and resubscription.
-- Ignoring backpressure.
-- Treating REST response as execution confirmation.
-- Not using sequence numbers.
-- Using one event loop for CPU-heavy processing and websocket I/O.
+Websocket is useful for streams, but it is not automatically reliable or low-latency. Discuss reconnect/resubscribe, sequence numbers, backpressure, and clear REST status semantics.
 
 ---
 

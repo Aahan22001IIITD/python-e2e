@@ -194,7 +194,7 @@ sudo chmod 640 /etc/order-router.env
 sudo chown root:order-router /etc/order-router.env
 ```
 
-### Common Interview Trap
+### Warning
 
 Question: "Is putting secrets in environment variables always safe?"
 

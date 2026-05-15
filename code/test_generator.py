@@ -1,12 +1,13 @@
-import asyncio
+def multiplier(n):
 
-async def price_generator():
-    for price in [100.1 , 100.2 , 100]:
-        yield price
-        await asyncio.sleep(0.01)
+    def multiply(x):
+        return x * n
 
-async def consume():
-    async for price in price_generator():
-        print (price)
+    return multiply
 
-asyncio.run(consume())
+
+double = multiplier(2)
+triple = multiplier(3)
+
+print(double(5))
+print(triple(5))

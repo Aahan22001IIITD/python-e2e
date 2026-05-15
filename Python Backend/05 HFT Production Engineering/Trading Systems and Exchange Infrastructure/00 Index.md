@@ -43,6 +43,8 @@ client / strategy
   <- event stream + order state updates
 ```
 
+This output is the simplest mental model for the whole section: commands move down toward the exchange, while facts from the exchange move back up as events. Most production bugs happen when one side is treated as synchronous even though the real system is distributed.
+
 Interview answer pattern:
 
 1. Define the trading concept.

@@ -67,6 +67,7 @@ event processing + websocket update:   500 us
 ```
 
 Exact numbers vary by system, but the interview point is to decompose the path.
+This output also shows why "optimize Python code" is not always the first answer: network and exchange time may dominate the total path.
 
 ---
 
@@ -99,6 +100,8 @@ async def bad_handler(message: bytes) -> None:
     await publish_update(update)
 ```
 
+Behavior: if `write_to_database_sync()` takes 50 ms, every other coroutine sharing that event loop can be delayed by the same blocking call.
+
 Better pattern:
 
 ```python
@@ -108,6 +111,8 @@ async def handle_market_data(message: bytes, audit_queue: asyncio.Queue) -> None
     audit_queue.put_nowait(update)
     await publish_update(update)
 ```
+
+This version updates the in-memory book and publishes quickly, while audit persistence can be handled by a separate worker. The justification is not "ignore durability"; it is "do not put slow disk/database work on the hottest message path unless the design explicitly requires it."
 
 ---
 
@@ -129,7 +134,7 @@ Production considerations:
 - Use heartbeats to detect dead connections quickly.
 - Understand cloud networking variability if not colocated.
 
-Interview trap: saying latency is only code speed. Network and deployment topology are often larger factors.
+Keep in mind: latency is not only code speed. Network distance, routing, deployment topology, and exchange behavior can be larger factors.
 
 ---
 
@@ -185,6 +190,8 @@ hot path:
 background path:
   consume events -> persist normalized history -> reconcile/report
 ```
+
+This output separates the urgent path from the durable/reporting path. The hot path answers "can we react now?", while the background path answers "can we audit and reconcile later?"
 
 ---
 
@@ -261,7 +268,7 @@ Investigate:
 
 ---
 
-## Common Interview Questions And Traps
+## Common Interview Questions
 
 - How would you measure order latency end-to-end?
   - Answer: Add timestamps at API ingress, validation, risk, enqueue, connector send, exchange ack/fill, event processing, and client delivery.
@@ -276,14 +283,9 @@ Investigate:
 - How do you debug latency spikes in production?
   - Answer: Separate p50/p99, then check deploys, traffic, queue depth, dependency latency, CPU/GC, logs, traces, and exchange status.
 
-Traps:
+Keep in mind:
 
-- Optimizing code before measuring.
-- Reporting only average latency.
-- Ignoring network and exchange latency.
-- Treating database writes as free.
-- Using unbounded queues.
-- Adding retries without deadlines.
+Measure first and report p99, not only averages. Be careful with network/exchange latency, synchronous DB writes, unbounded queues, and retries without deadlines.
 
 ---
 
